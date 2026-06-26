@@ -1,4 +1,4 @@
-"""Generate ``.pyi`` type stubs from the (mock) discovery schemas.
+"""Generate ``.pyi`` type stubs from the **offline bundled** task schemas.
 
 Running this writes:
 
@@ -6,16 +6,24 @@ Running this writes:
     poc_compute_engine/<topic>/__init__.pyi              # re-exports each task module
     poc_compute_engine/<topic>/<task>.pyi                # typed run(...) + Result
 
-The runtime stays generic (see poc_compute_engine/_engine.py); these stubs only add the
-*static* developer experience (IDE autocomplete, signature help, type-checking).
-Re-run after the schema changes to refresh the static surface.
+Schemas come from ``poc_compute_engine._schemas`` (the offline ``schemas/`` snapshot)
+— NOT from live discovery. Generation is therefore deterministic and network-free.
+
+The generator is **override-aware**: if a task has a hand-written override module
+(``poc_compute_engine/overrides/<topic>/<task>.py``), its stub simply RE-EXPORTS
+that module's typed ``run``/result classes instead of deriving them from the schema.
+Otherwise the stub is synthesised from the schema.
+
+The runtime stays generic (see poc_compute_engine/_engine.py); these stubs only add
+the *static* developer experience (IDE autocomplete, signature help, type-checking).
+Re-run after the schema (or an override) changes to refresh the static surface.
 """
 
 from __future__ import annotations
 
 from pathlib import Path
 
-from poc_compute_engine.mock_discovery import fetch_discovery
+from poc_compute_engine import _schemas
 
 _JSON_TO_PY = {
     "string": "str",
@@ -26,7 +34,7 @@ _JSON_TO_PY = {
     "array": "list",
 }
 
-_HEADER = "# AUTO-GENERATED FROM DISCOVERY SCHEMAS. DO NOT EDIT BY HAND.\n"
+_HEADER = "# AUTO-GENERATED FROM OFFLINE SCHEMAS. DO NOT EDIT BY HAND.\n"
 
 
 def _annotation(prop: dict) -> str:
@@ -111,10 +119,30 @@ def _render_task_stub(spec: dict) -> str:
     return "\n".join(lines)
 
 
+def _override_path(root: Path, topic: str, task: str) -> Path:
+    mod = task.replace("-", "_")
+    return root / "overrides" / topic / f"{mod}.py"
+
+
+def _render_override_stub(spec: dict) -> str:
+    """Re-export an override module's typed surface instead of deriving from schema."""
+    topic = spec["topic"]
+    mod = spec["name"].replace("-", "_")
+    cls = _class_name(spec["name"])
+    return (
+        _HEADER
+        + f"# This task has a hand-written override at overrides/{topic}/{mod}.py;\n"
+        + "# the stub re-exports it verbatim so the static surface matches the runtime.\n"
+        + f"from poc_compute_engine.overrides.{topic}.{mod} import (\n"
+        + f"    {cls} as {cls},\n"
+        + "    run as run,\n"
+        + ")\n"
+    )
+
+
 def generate(root: Path) -> list[Path]:
-    payload = fetch_discovery()
     by_topic: dict[str, list[dict]] = {}
-    for spec in payload["results"]:
+    for spec in _schemas.load_bundled_specs():
         by_topic.setdefault(spec["topic"], []).append(spec)
 
     written: list[Path] = []
@@ -141,7 +169,10 @@ def generate(root: Path) -> list[Path]:
         for spec in specs:
             mod = spec["name"].replace("-", "_")
             path = tdir / f"{mod}.pyi"
-            path.write_text(_render_task_stub(spec))
+            if _override_path(root, topic, spec["name"]).exists():
+                path.write_text(_render_override_stub(spec))
+            else:
+                path.write_text(_render_task_stub(spec))
             written.append(path)
 
     return written

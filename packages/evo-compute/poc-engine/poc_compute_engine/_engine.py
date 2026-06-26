@@ -15,9 +15,12 @@ about demonstrating the DX, not real reference resolution.
 
 from __future__ import annotations
 
+import importlib
 import inspect
+from types import ModuleType
 from typing import Any, Literal
 
+from . import _schemas
 from .mock_discovery import fetch_discovery
 
 _JSON_TO_PY: dict[str, type] = {
@@ -31,16 +34,40 @@ _JSON_TO_PY: dict[str, type] = {
 
 
 class DiscoveryClient:
-    """Thin reader over the discovery payload."""
+    """Reader over the task catalogue.
+
+    The catalogue is the UNION of two sources, in this precedence order:
+
+    * **bundled** offline ``schema.json`` files (``_schemas``) — the tasks that
+      also have generated stubs, and
+    * **live** discovery (``mock_discovery.fetch_discovery``) — tasks the platform
+      advertises that are NOT in the bundle (no stubs).
+
+    Bundled specs win on name collisions so a pinned, stub-backed contract is never
+    silently shadowed by a live one.
+    """
+
+    def _catalogue(self) -> list[dict]:
+        seen: set[tuple[str, str]] = set()
+        catalogue: list[dict] = []
+        for spec in _schemas.load_bundled_specs():
+            key = (spec["topic"], spec["name"])
+            seen.add(key)
+            catalogue.append(spec)
+        for spec in fetch_discovery()["results"]:
+            key = (spec["topic"], spec["name"])
+            if key not in seen:
+                catalogue.append(spec)
+        return catalogue
 
     def topics(self) -> list[str]:
-        return sorted({t["topic"] for t in fetch_discovery()["results"]})
+        return sorted({t["topic"] for t in self._catalogue()})
 
     def tasks(self, topic: str) -> list[str]:
-        return sorted(t["name"] for t in fetch_discovery()["results"] if t["topic"] == topic)
+        return sorted(t["name"] for t in self._catalogue() if t["topic"] == topic)
 
     def get(self, topic: str, name: str) -> dict | None:
-        for t in fetch_discovery()["results"]:
+        for t in self._catalogue():
             if t["topic"] == topic and t["name"] == name:
                 return t
         return None
@@ -285,16 +312,34 @@ def _make_run(spec: dict):
     return run
 
 
+def _load_override(topic: str, task: str) -> ModuleType | None:
+    """Convention import of a per-task override, if one exists.
+
+    The engine looks for ``poc_compute_engine.overrides.<topic>.<task>``. If that
+    module exists it OWNS the task: its hand-written, fully-typed ``run`` is used
+    instead of the schema-synthesised one, transparently to the caller (no client
+    code change). If it does not exist, the generic schema-driven path is used.
+    """
+    mod_name = f"{__package__}.overrides.{topic}.{task}"
+    try:
+        return importlib.import_module(mod_name)
+    except ModuleNotFoundError:
+        return None
+
+
 class _TaskProxy:
-    def __init__(self, spec: dict) -> None:
+    def __init__(self, spec: dict, override: ModuleType | None = None) -> None:
         self._spec = spec
-        self.run = _make_run(spec)
+        self._override = override
+        # An override gets to fully control `run`; otherwise synthesise it.
+        self.run = override.run if override is not None else _make_run(spec)
 
     def __dir__(self):
         return ["run"]
 
     def __repr__(self) -> str:
-        return f"<task {self._spec['topic']}/{self._spec['name']} v{self._spec.get('version')}>"
+        kind = "override" if self._override is not None else "generic"
+        return f"<task {self._spec['topic']}/{self._spec['name']} v{self._spec.get('version')} ({kind})>"
 
 
 class _TopicProxy:
@@ -306,7 +351,8 @@ class _TopicProxy:
         if spec is None:
             available = ", ".join(_client.tasks(self._topic))
             raise AttributeError(f"no task {name!r} in topic {self._topic!r}. Available: {available}")
-        return _TaskProxy(spec)
+        override = _load_override(self._topic, name)
+        return _TaskProxy(spec, override)
 
     def __dir__(self):
         return _client.tasks(self._topic)

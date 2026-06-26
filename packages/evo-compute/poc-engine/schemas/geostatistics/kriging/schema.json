@@ -1,0 +1,100 @@
+{
+  "version": "1.0.0",
+  "feature_flag": "preview",
+  "description": "Estimate a target attribute on a grid using kriging.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "source": {
+        "type": "string",
+        "reference_to": "attribute",
+        "description": "Source attribute to estimate from."
+      },
+      "target": {
+        "type": "string",
+        "reference_to": "attribute",
+        "description": "Target attribute to write the estimate to."
+      },
+      "variogram": {
+        "type": "string",
+        "reference_to": "geoscience-object",
+        "description": "Variogram model object."
+      },
+      "kriging_type": {
+        "type": "string",
+        "enum": ["simple", "ordinary"],
+        "default": "ordinary",
+        "description": "Kriging variant to run."
+      },
+      "max_samples": {
+        "type": "integer",
+        "default": 20,
+        "description": "Maximum samples in the search neighbourhood."
+      }
+    },
+    "required": ["source", "target", "variogram"]
+  },
+  "results": {
+    "type": "object",
+    "title": "KrigingResult",
+    "description": "Result of the kriging task.",
+    "required": ["message", "target"],
+    "properties": {
+      "message": {
+        "type": "string",
+        "description": "A message that says what happened in the task."
+      },
+      "target": {
+        "type": "object",
+        "output": "geoscience-object",
+        "description": "The target that was created or updated.",
+        "required": ["reference", "name", "description", "schema_id", "attribute"],
+        "properties": {
+          "reference": {
+            "type": "string",
+            "format": "uri",
+            "reference_to": "geoscience-object",
+            "supported_schemas": [
+              "regular-3d-grid/[>=1.2,<2]",
+              "regular-masked-3d-grid/[>=1.2,<2]",
+              "tensor-3d-grid/[>=1.2,<2]",
+              "block-model/[>=1.0,<2]",
+              "pointset/[>=1.2,<2]",
+              "downhole-intervals/[>=1.2,<2]"
+            ],
+            "description": "Reference to a geoscience object."
+          },
+          "name": {"type": "string", "description": "The name of the geoscience object."},
+          "description": {
+            "type": ["string", "null"],
+            "description": "The description of the geoscience object."
+          },
+          "schema_id": {"type": "string", "description": "The ID of the Geoscience Object schema."},
+          "attribute": {
+            "type": "object",
+            "output": "attribute",
+            "description": "Attribute containing the kriging result.",
+            "required": ["reference", "name"],
+            "properties": {
+              "reference": {
+                "type": "string",
+                "reference_to": "attribute",
+                "attribute_from": "2/reference",
+                "attribute_path": {
+                  "block-model/[>=1.0,<2]": ["attributes[?attribute_type=='Float64']"],
+                  "downhole-intervals/[>=1.2,<2]": ["attributes[?attribute_type=='scalar']"],
+                  "pointset/[>=1.2,<2]": ["locations.attributes[?attribute_type=='scalar']"],
+                  "regular-3d-grid/[>=1.2,<2]": ["cell_attributes[?attribute_type=='scalar']"],
+                  "regular-masked-3d-grid/[>=1.2,<2]": ["cell_attributes[?attribute_type=='scalar']"],
+                  "tensor-3d-grid/[>=1.2,<2]": ["cell_attributes[?attribute_type=='scalar']"]
+                },
+                "description": "Reference to the attribute in the geoscience object."
+              },
+              "name": {"type": "string", "description": "The name of the output attribute."}
+            }
+          }
+        }
+      }
+    }
+  }
+}

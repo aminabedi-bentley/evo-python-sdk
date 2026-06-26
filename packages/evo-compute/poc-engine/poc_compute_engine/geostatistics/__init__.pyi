@@ -1,4 +1,5 @@
-# AUTO-GENERATED FROM DISCOVERY SCHEMAS. DO NOT EDIT BY HAND.
+# AUTO-GENERATED FROM OFFLINE SCHEMAS. DO NOT EDIT BY HAND.
 
 from . import declustering as declustering
 from . import kriging as kriging
+from . import normal_score as normal_score

@@ -5,28 +5,29 @@ from typing import Any, Literal
 from poc_compute_engine._engine import GeoscienceObject, Table
 
 
-class DeclusteringResultTargetAttribute:
+class NormalScoreResultTargetAttribute:
     reference: str
     name: str
 
-class DeclusteringResultTarget:
+class NormalScoreResultTarget:
     reference: str
     name: str
     schema_id: str
-    attribute: DeclusteringResultTargetAttribute
+    attribute: NormalScoreResultTargetAttribute
     def get_object(self) -> GeoscienceObject: ...
     def to_dataframe(self) -> Table: ...
 
-class DeclusteringResult:
+class NormalScoreResult:
     message: str
-    target: DeclusteringResultTarget
+    target: NormalScoreResultTarget
 
 def run(
     *,
     source: str,
     target: str,
-    cell_size: float = ...,
+    weights: str = ...,
+    num_quantiles: int = ...,
     preview: bool = False,
-) -> DeclusteringResult:
-    """Compute declustering weights for a sample attribute."""
+) -> NormalScoreResult:
+    """Apply a normal-score transform to a sample attribute."""
     ...

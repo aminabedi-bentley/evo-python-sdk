@@ -1,0 +1,75 @@
+{
+  "version": "1.0.0",
+  "feature_flag": "",
+  "description": "Apply a normal-score transform to a sample attribute.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "source": {
+        "type": "string",
+        "reference_to": "attribute",
+        "description": "Sample attribute to transform."
+      },
+      "target": {
+        "type": "string",
+        "reference_to": "attribute",
+        "description": "Attribute to write the transformed values to."
+      },
+      "weights": {
+        "type": "string",
+        "reference_to": "attribute",
+        "description": "Optional declustering weights attribute."
+      },
+      "num_quantiles": {
+        "type": "integer",
+        "default": 100,
+        "description": "Number of quantiles used to build the transform table."
+      }
+    },
+    "required": ["source", "target"]
+  },
+  "results": {
+    "type": "object",
+    "title": "NormalScoreResult",
+    "description": "Result of the normal-score transform task.",
+    "required": ["message", "target"],
+    "properties": {
+      "message": {
+        "type": "string",
+        "description": "A message that says what happened in the task."
+      },
+      "target": {
+        "type": "object",
+        "output": "geoscience-object",
+        "description": "The object the transformed attribute was written to.",
+        "required": ["reference", "name", "schema_id", "attribute"],
+        "properties": {
+          "reference": {
+            "type": "string",
+            "reference_to": "geoscience-object",
+            "supported_schemas": ["pointset/[>=1.2,<2]"],
+            "description": "Reference to the geoscience object."
+          },
+          "name": {"type": "string", "description": "The name of the geoscience object."},
+          "schema_id": {"type": "string", "description": "The ID of the Geoscience Object schema."},
+          "attribute": {
+            "type": "object",
+            "output": "attribute",
+            "required": ["reference", "name"],
+            "properties": {
+              "reference": {
+                "type": "string",
+                "reference_to": "attribute",
+                "attribute_path": {
+                  "pointset/[>=1.2,<2]": ["locations.attributes[?attribute_type=='scalar']"]
+                },
+                "description": "Reference to the transformed attribute."
+              },
+              "name": {"type": "string", "description": "The name of the transformed attribute."}
+            }
+          }
+        }
+      }
+    }
+  }
+}

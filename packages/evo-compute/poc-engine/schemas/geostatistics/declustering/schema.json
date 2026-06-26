@@ -1,0 +1,70 @@
+{
+  "version": "1.0.0",
+  "feature_flag": "",
+  "description": "Compute declustering weights for a sample attribute.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "source": {
+        "type": "string",
+        "reference_to": "attribute",
+        "description": "Sample attribute to decluster."
+      },
+      "target": {
+        "type": "string",
+        "reference_to": "attribute",
+        "description": "Attribute to write the declustering weights to."
+      },
+      "cell_size": {
+        "type": "number",
+        "default": 100.0,
+        "description": "Declustering cell size."
+      }
+    },
+    "required": ["source", "target"]
+  },
+  "results": {
+    "type": "object",
+    "title": "DeclusteringResult",
+    "description": "Result of the declustering task.",
+    "required": ["message", "target"],
+    "properties": {
+      "message": {
+        "type": "string",
+        "description": "A message that says what happened in the task."
+      },
+      "target": {
+        "type": "object",
+        "output": "geoscience-object",
+        "description": "The object the declustering weights were written to.",
+        "required": ["reference", "name", "schema_id", "attribute"],
+        "properties": {
+          "reference": {
+            "type": "string",
+            "reference_to": "geoscience-object",
+            "supported_schemas": ["pointset/[>=1.2,<2]"],
+            "description": "Reference to the geoscience object."
+          },
+          "name": {"type": "string", "description": "The name of the geoscience object."},
+          "schema_id": {"type": "string", "description": "The ID of the Geoscience Object schema."},
+          "attribute": {
+            "type": "object",
+            "output": "attribute",
+            "required": ["reference", "name"],
+            "properties": {
+              "reference": {
+                "type": "string",
+                "reference_to": "attribute",
+                "attribute_path": {
+                  "pointset/[>=1.2,<2]": ["locations.attributes[?attribute_type=='scalar']"]
+                },
+                "description": "Reference to the weights attribute."
+              },
+              "name": {"type": "string", "description": "The name of the weights attribute."}
+            }
+          }
+        }
+      }
+    }
+  }
+}
