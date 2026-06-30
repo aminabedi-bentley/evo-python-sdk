@@ -1,47 +1,52 @@
 """Static-DX sample: CORRECT usage. A type checker should report 0 errors.
 
-Open this in an IDE (VS Code/Pylance, PyCharm) to see autocomplete + signature
-help, OR run:  pyright typed_usage_ok.py   (or: mypy typed_usage_ok.py)
-
-All type information here comes from the GENERATED STUBS, not from running code.
-For kriging the stub re-exports the hand-written OVERRIDE, so the override's
-richer typed surface (summary/portal_url) is what the checker sees.
+All type information comes from the generated poc_compute_engine/__init__.pyi, which
+types the authenticated ComputeClient tree. Run:
+    pyright typed_usage_ok.py     (or: mypy typed_usage_ok.py)
 """
 
-import poc_compute_engine
+from typing import cast
 
-# kriging is OVERRIDE-backed: the stub re-exports overrides/geostatistics/kriging.py.
-result = poc_compute_engine.geostatistics.kriging.run(
-    source="grade",
-    target="kriged_grade",
-    variogram="vario-123",
-    kriging_type="ordinary",  # Literal['simple', 'ordinary']
-    max_samples=16,
-)
+from evo.common import IContext
 
-# Override-only helpers are statically known.
-summary: str = result.summary()
-url: str = result.portal_url()
+from poc_compute_engine import ComputeClient
 
-message: str = result.message
-attr_name: str = result.target.attribute.name
-schema_id: str = result.target.schema_id
 
-# Output hydration is typed too: get_object() -> GeoscienceObject, to_dataframe() -> Table.
-obj = result.target.get_object()
-table = result.target.to_dataframe()
+# At runtime this is a real IContext (e.g. the ServiceManagerWidget `manager`); for a
+# static type-check fixture we only need something typed as IContext.
+async def main() -> None:
+    async with ComputeClient(cast(IContext, None)) as client:
+        # Autocomplete after `client.geostatistics.` lists the live tasks; `.run(` is typed.
+        result = await client.geostatistics.kriging_gcp.run(
+            source="grade",
+            target="kriged_grade",
+            variogram="vario-123",
+            kriging_type="ordinary",  # Literal['simple', 'ordinary']
+            max_samples=16,
+        )
 
-# declustering & normal_score are GENERIC (schema-derived stubs, no override).
-declus = poc_compute_engine.geostatistics.declustering.run(
-    source="grade",
-    target="weights",
-    cell_size=50.0,
-)
-declus_attr: str = declus.target.attribute.name
+        message: str = result.message
+        attr_name: str = result.target.attribute.name
+        schema_id: str = result.target.schema_id
 
-ns = poc_compute_engine.geostatistics.normal_score.run(
-    source="grade",
-    target="grade_ns",
-    num_quantiles=200,
-)
-ns_msg: str = ns.message
+        obj = result.target.get_object()       # GeoscienceObject
+        table = result.target.to_dataframe()   # Table
+
+        # `kriging_gcp` is a SPECIALIZED override (poc_compute_engine/overrides/geostatistics/kriging_gcp.py),
+        # so it exposes a hand-written surface the schema can't: a `mean` parameter and result
+        # helpers. Same `await client...run(...)` DX; richer, fully-typed behaviour.
+        simple = await client.geostatistics.kriging_gcp.run(
+            source="grade",
+            target="kriged_grade",
+            variogram="vario-123",
+            kriging_type="simple",
+            mean=2.5,  # override-only parameter (absent from the discovery schema)
+        )
+        summary: str = simple.summary()      # override-only helper
+        portal: str = simple.portal_url()    # override-only helper
+
+        declus = await client.geostatistics.declustering.run(source="grade", target="weights", cell_size=50.0)
+        declus_attr: str = declus.target.attribute.name
+
+        ns = await client.geostatistics.normal_score_gcp.run(source="grade", target="grade_ns", num_quantiles=200)
+        ns_msg: str = ns.message
