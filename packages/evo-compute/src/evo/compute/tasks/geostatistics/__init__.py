@@ -14,8 +14,11 @@
 This package groups all geostatistics-topic compute tasks:
 
 - **kriging** — Kriging interpolation
+- **knn** — K-nearest neighbour estimation
+- **idw** — Inverse distance weighting estimation
 - **break_ties** — Spatial tie-breaking
 - **conditioned_simulator** — Conditional turning-band simulation
+- **conditional_turning_bands** — Conditional turning-band simulation (pre-computed distribution)
 - **declustering** — Grid-based declustering weights
 - **location_wise** — Per-location ensemble statistics
 - **continuous_distribution** — Continuous non-parametric cumulative distribution
@@ -35,9 +38,12 @@ Example:
 """
 
 from . import break_ties as _break_ties_module  # noqa: F401
+from . import conditional_turning_bands as _conditional_turning_bands_module  # noqa: F401
 from . import conditioned_simulator as _conditioned_simulator_module  # noqa: F401
 from . import continuous_distribution as _continuous_distribution_module  # noqa: F401
 from . import declustering as _declustering_module  # noqa: F401
+from . import idw as _idw_module  # noqa: F401
+from . import knn as _knn_module  # noqa: F401
 from . import kriging as _kriging_module  # noqa: F401
 from . import location_wise as _location_wise_module  # noqa: F401
 from . import loss_calculation as _loss_calculation_module  # noqa: F401
@@ -45,7 +51,10 @@ from . import normal_score as _normal_score_module  # noqa: F401
 from . import profit_calculation as _profit_calculation_module  # noqa: F401
 from . import simulation_report as _simulation_report_module  # noqa: F401
 from .break_ties import BreakTiesResult
+from .conditional_turning_bands import ConditionalTurningBandsResult
 from .declustering import DeclusteringResult
+from .idw import IDWResult
+from .knn import KNNResult
 from .kriging import (
     BlockDiscretisation,
     Filter,
@@ -56,8 +65,11 @@ from .location_wise import LocationWiseResult
 __all__ = [
     "BlockDiscretisation",
     "BreakTiesResult",
+    "ConditionalTurningBandsResult",
     "DeclusteringResult",
     "Filter",
+    "IDWResult",
+    "KNNResult",
     "KrigingResult",
     "LocationWiseResult",
 ]
