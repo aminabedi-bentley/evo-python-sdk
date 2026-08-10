@@ -175,6 +175,20 @@ class TestDiscoveryClient(TestWithConnector):
             second = await self.client.list_tasks()
         self.assertTrue(second)
 
+    async def test_peek_tasks_serves_the_cache_without_fetching(self) -> None:
+        """``peek_tasks`` never hits the network, and goes empty again with the TTL."""
+        self.assertEqual([], self.client.peek_tasks())
+        self.transport.assert_n_requests_made(0)
+
+        with self.set_discovery_response():
+            await self.client.list_tasks()
+        self.assertEqual(len(self.catalogue["results"]), len(self.client.peek_tasks()))
+        self.transport.assert_n_requests_made(1)
+
+        self.clock.advance(DEFAULT_CACHE_TTL_SECONDS + 1)
+        self.assertEqual([], self.client.peek_tasks())
+        self.transport.assert_n_requests_made(1)
+
     async def test_concurrent_cold_calls_fetch_once(self) -> None:
         """A burst of concurrent calls on a cold cache triggers a single fetch."""
         calls = 0

@@ -15,6 +15,7 @@ import inspect
 import json
 from collections.abc import Iterator
 from contextlib import contextmanager
+from typing import Any, Literal, Optional
 from unittest import mock
 
 from evo.common.test_tools import ORG as TEST_ORG
@@ -98,6 +99,41 @@ class TestComputeClient(TestWithConnector):
             await self.client.geostatistics.kriging_gcp.run(source="s", target="t", variogram="v")
         self.assertEqual(1, self.transport.request.call_count)
 
+    async def test_catalogue_is_shared_across_topics(self) -> None:
+        """One catalogue fetch serves every topic, not just the first one touched."""
+        with self.catalogue_response(), self.mock_job_client() as submit:
+            await self.client.geostatistics.declustering.run(source="obj-1")
+            await self.client.converter.obj_import.run(file="mesh.obj")
+
+        self.assertEqual(1, self.transport.request.call_count)
+        self.assertEqual("converter", submit.await_args.kwargs["topic"])
+        self.assertEqual("obj-import", submit.await_args.kwargs["task"])
+
+    # -- parameter forwarding ---------------------------------------------- #
+
+    async def test_schema_defaults_are_not_forwarded(self) -> None:
+        """Unset optionals are omitted so the platform applies its own defaults."""
+        with self.catalogue_response(), self.mock_job_client() as submit:
+            await self.client.geostatistics.declustering.run(source="obj-1")
+
+        parameters = submit.await_args.kwargs["parameters"]
+        self.assertNotIn("method", parameters)  # schema default "cell" must not be sent
+        self.assertNotIn("power", parameters)
+
+    async def test_explicit_falsy_values_are_forwarded(self) -> None:
+        """A supplied ``0``/``False`` is a real value, not an omission."""
+        with self.catalogue_response(), self.mock_job_client() as submit:
+            await self.client.geostatistics.declustering.run(source="obj-1", power=0.0)
+
+        self.assertEqual({"source": "obj-1", "power": 0.0}, submit.await_args.kwargs["parameters"])
+
+    async def test_explicit_none_is_forwarded(self) -> None:
+        """An explicit ``None`` reaches the wire for a nullable parameter."""
+        with self.catalogue_response(), self.mock_job_client() as submit:
+            await self.client.geostatistics.declustering.run(source="obj-1", power=None)
+
+        self.assertEqual({"source": "obj-1", "power": None}, submit.await_args.kwargs["parameters"])
+
     # -- preview flag ------------------------------------------------------ #
 
     async def test_preview_defaults_to_feature_flag(self) -> None:
@@ -129,6 +165,16 @@ class TestComputeClient(TestWithConnector):
                 await self.client.geostatistics.declustering.run()
         submit.assert_not_awaited()
 
+    async def test_unexpected_parameter_raises_type_error(self) -> None:
+        """An unknown keyword argument is rejected, and the error names the task."""
+        with self.catalogue_response(), self.mock_job_client() as submit:
+            with self.assertRaises(TypeError) as ctx:
+                await self.client.geostatistics.declustering.run(source="obj-1", bogus=1)
+
+        self.assertIn("geostatistics.declustering.run():", str(ctx.exception))
+        self.assertIn("bogus", str(ctx.exception))
+        submit.assert_not_awaited()
+
     # -- progressive ergonomics (cache-backed, no forced discovery) -------- #
 
     async def test_signature_is_synthesised_after_caching(self) -> None:
@@ -142,6 +188,30 @@ class TestComputeClient(TestWithConnector):
         self.assertIn("preview", signature.parameters)
         self.assertIs(inspect.Parameter.empty, signature.parameters["source"].default)
         self.assertIsNone(signature.parameters["power"].default)
+
+    async def test_signature_annotations_follow_the_schema(self) -> None:
+        """Parameter annotations are derived from each property's JSON Schema type."""
+        with self.catalogue_response(), self.mock_job_client():
+            await self.client.geostatistics.declustering.run(source="obj-1")
+
+        parameters = inspect.signature(self.client.geostatistics.declustering.run).parameters
+        self.assertEqual(Literal["cell", "polygon"], parameters["method"].annotation)  # enum
+        self.assertEqual(Optional[float], parameters["power"].annotation)  # ["number", "null"]
+        self.assertEqual(dict, parameters["source"].annotation)  # object
+        self.assertEqual(Any, parameters["options"].annotation)  # no declared type
+        self.assertEqual(bool, parameters["preview"].annotation)
+
+    async def test_signature_is_refreshed_on_a_reused_proxy(self) -> None:
+        """A proxy (and its ``run``) held from before the first call still picks up the schema."""
+        task_proxy = self.client.geostatistics.declustering
+        run = task_proxy.run
+        self.assertNotIn("source", inspect.signature(run).parameters)
+
+        with self.catalogue_response(), self.mock_job_client():
+            await run(source="obj-1")
+
+        self.assertIn("source", inspect.signature(run).parameters)
+        self.assertIn("source", inspect.signature(task_proxy.run).parameters)
 
     async def test_dir_lists_cached_topics_and_tasks(self) -> None:
         """After a run, tab-completion surfaces the cached topics/tasks."""

@@ -19,8 +19,9 @@ and submit the job::
     client = ComputeClient(context)
     result = await client.geostatistics.kriging_gcp.run(source=..., target=..., ...)
 
-Discovery is performed the first time a task within a topic is ``run(...)``; the
-catalogue is then cached in memory so repeated runs don't re-fetch it.
+Discovery is performed the first time a task within a topic is ``run(...)``. The
+catalogue is then held by the underlying :class:`~evo.compute.discovery.DiscoveryClient`,
+so repeated runs are served from there until its cache expires.
 """
 
 from __future__ import annotations
@@ -114,7 +115,6 @@ class ComputeClient:
         self._org_id: UUID = context.get_org_id()
         self._connector: APIConnector = context.get_connector()
         self._discovery = DiscoveryClient(self._connector, self._org_id, cache_ttl_seconds=cache_ttl_seconds)
-        self._spec_cache: dict[tuple[str, str], TaskResource] = {}
 
     # -- dynamic namespace ------------------------------------------------- #
 
@@ -125,37 +125,42 @@ class ComputeClient:
         return _TopicProxy(self, name)
 
     def __dir__(self) -> list[str]:
-        return sorted(set(super().__dir__()) | set(self._cached_topics()))
+        return sorted(set(super().__dir__()) | set(self._peek_topics()))
 
     def __repr__(self) -> str:
         return f"ComputeClient(org_id={str(self._org_id)!r})"
 
-    # -- in-memory catalogue cache ----------------------------------------- #
+    # -- non-blocking reads of the discovery cache -------------------------- #
 
-    def _cached_spec(self, topic: str, task: str) -> TaskResource | None:
-        return self._spec_cache.get((topic, _normalise(task)))
+    def _peek_spec(self, topic: str, task: str) -> TaskResource | None:
+        """Return an already-discovered spec, or ``None`` while the catalogue is unfetched or stale."""
+        normalised = _normalise(task)
+        for resource in self._discovery.peek_tasks():
+            if resource.topic == topic and _normalise(resource.name) == normalised:
+                return resource
+        return None
 
-    def _cached_topics(self) -> list[str]:
-        return sorted({topic for topic, _ in self._spec_cache})
+    def _peek_topics(self) -> list[str]:
+        return sorted({resource.topic for resource in self._discovery.peek_tasks()})
 
-    def _cached_tasks(self, topic: str) -> list[str]:
-        return sorted(task for cached_topic, task in self._spec_cache if cached_topic == topic)
+    def _peek_tasks(self, topic: str) -> list[str]:
+        return sorted(_normalise(resource.name) for resource in self._discovery.peek_tasks() if resource.topic == topic)
 
     # -- execution --------------------------------------------------------- #
 
     async def arun(self, topic: str, task: str, parameters: dict[str, Any]) -> dict:
         """Discover the task (cached), submit it, and return the results."""
         spec = await self._resolve_spec(topic, task)
+        signature = _signature_from_schema(spec)
         try:
-            bound = _signature_from_schema(spec).bind(**parameters)
+            bound = signature.bind(**parameters)
         except TypeError as error:
             raise TypeError(f"{topic}.{_normalise(task)}.run(): {error}") from None
-        bound.apply_defaults()
 
-        arguments = dict(bound.arguments)
-        preview = bool(arguments.pop("preview"))
-        # Omit unset optional parameters so the platform applies its own defaults.
-        wire_parameters = {name: value for name, value in arguments.items() if value is not None}
+        # Forward only what the caller actually passed, so unset optionals fall back to the
+        # platform's own defaults while an explicit ``None`` still reaches the wire.
+        wire_parameters = dict(bound.arguments)
+        preview = bool(wire_parameters.pop("preview", signature.parameters["preview"].default))
 
         job: JobClient[dict] = await JobClient.submit(
             connector=self._connector,
@@ -169,20 +174,19 @@ class ComputeClient:
         return await job.wait_for_results()
 
     async def _resolve_spec(self, topic: str, task: str) -> TaskResource:
-        """Return the discovery spec for ``topic``/``task``, fetching once and caching it."""
-        normalised = _normalise(task)
-        if (cached := self._cached_spec(topic, task)) is not None:
-            return cached
+        """Return the discovery spec for ``topic``/``task``.
 
+        The catalogue lives in :class:`~evo.compute.discovery.DiscoveryClient`, which fetches
+        it once and serves it from there until its TTL expires.
+        """
+        normalised = _normalise(task)
         topic_tasks = await self._discovery.get_topic_tasks(topic)
         for resource in topic_tasks:
-            self._spec_cache[(topic, _normalise(resource.name))] = resource
-        spec = self._spec_cache.get((topic, normalised))
+            if _normalise(resource.name) == normalised:
+                return resource
 
-        if spec is None:
-            available = ", ".join(sorted(_normalise(resource.name) for resource in topic_tasks)) or "(none)"
-            raise AttributeError(f"no task {task!r} in topic {topic!r}. Available: {available}")
-        return spec
+        available = ", ".join(sorted(_normalise(resource.name) for resource in topic_tasks)) or "(none)"
+        raise AttributeError(f"no task {task!r} in topic {topic!r}. Available: {available}")
 
 
 class _TopicProxy:
@@ -198,7 +202,7 @@ class _TopicProxy:
         return _TaskProxy(self._client, self._topic, name)
 
     def __dir__(self) -> list[str]:
-        return sorted(set(super().__dir__()) | set(self._client._cached_tasks(self._topic)))
+        return sorted(set(super().__dir__()) | set(self._client._peek_tasks(self._topic)))
 
     def __repr__(self) -> str:
         return f"<compute topic {self._topic!r}>"
@@ -223,18 +227,27 @@ class _TaskProxy:
 def _make_run(client: ComputeClient, topic: str, task: str):
     """Build the async ``run`` callable for a task proxy.
 
-    If the task's schema is already cached, the callable advertises a synthesised
-    signature for editor tab-completion. Otherwise it accepts generic keyword arguments
-    and the schema is fetched on first call. Either way discovery is never triggered
-    by attribute access alone.
+    If the task's schema has already been discovered, the callable advertises a synthesised
+    signature for editor tab-completion. Otherwise it accepts generic keyword arguments and the
+    schema is fetched on first call, after which the callable re-describes itself. Either way
+    discovery is never triggered by attribute access alone.
     """
 
     async def run(**parameters: Any) -> dict:
-        return await client.arun(topic, task, parameters)
+        try:
+            return await client.arun(topic, task, parameters)
+        finally:
+            # The first call populates the catalogue, so this callable can now describe itself.
+            _describe_from_schema(run, client, topic, task)
 
     run.__name__ = "run"
     run.__qualname__ = f"{_normalise(task)}.run"
-    if (spec := client._cached_spec(topic, task)) is not None:
-        run.__signature__ = _signature_from_schema(spec)  # type: ignore[attr-defined]
-        run.__doc__ = spec.description or run.__doc__
+    _describe_from_schema(run, client, topic, task)
     return run
+
+
+def _describe_from_schema(run: Any, client: ComputeClient, topic: str, task: str) -> None:
+    """Shape ``run``'s signature and docstring from the task schema, if it has been discovered."""
+    if (spec := client._peek_spec(topic, task)) is not None:
+        run.__signature__ = _signature_from_schema(spec)
+        run.__doc__ = spec.description or run.__doc__
