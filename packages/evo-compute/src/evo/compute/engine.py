@@ -125,7 +125,7 @@ class ComputeClient:
         return _TopicProxy(self, name)
 
     def __dir__(self) -> list[str]:
-        return sorted(set(super().__dir__()) | set(self._peek_topics()))
+        return sorted(set(super().__dir__()) | {resource.topic for resource in self._discovery.peek_tasks()})
 
     def __repr__(self) -> str:
         return f"ComputeClient(org_id={str(self._org_id)!r})"
@@ -139,12 +139,6 @@ class ComputeClient:
             if resource.topic == topic and _normalise(resource.name) == normalised:
                 return resource
         return None
-
-    def _peek_topics(self) -> list[str]:
-        return sorted({resource.topic for resource in self._discovery.peek_tasks()})
-
-    def _peek_tasks(self, topic: str) -> list[str]:
-        return sorted(_normalise(resource.name) for resource in self._discovery.peek_tasks() if resource.topic == topic)
 
     # -- execution --------------------------------------------------------- #
 
@@ -202,7 +196,14 @@ class _TopicProxy:
         return _TaskProxy(self._client, self._topic, name)
 
     def __dir__(self) -> list[str]:
-        return sorted(set(super().__dir__()) | set(self._client._peek_tasks(self._topic)))
+        return sorted(
+            set(super().__dir__())
+            | {
+                _normalise(resource.name)
+                for resource in self._client._discovery.peek_tasks()
+                if resource.topic == self._topic
+            }
+        )
 
     def __repr__(self) -> str:
         return f"<compute topic {self._topic!r}>"
@@ -238,6 +239,7 @@ def _make_run(client: ComputeClient, topic: str, task: str):
             return await client.arun(topic, task, parameters)
         finally:
             # The first call populates the catalogue, so this callable can now describe itself.
+            # Safe to repeat: it recomputes the same shape, or picks up a newer spec after a refresh.
             _describe_from_schema(run, client, topic, task)
 
     run.__name__ = "run"
