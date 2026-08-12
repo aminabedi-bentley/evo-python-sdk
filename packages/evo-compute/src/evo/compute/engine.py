@@ -35,6 +35,8 @@ from evo.common import APIConnector, IContext
 from .client import JobClient
 from .discovery import DEFAULT_CACHE_TTL_SECONDS, DiscoveryClient
 from .endpoints.models import TaskResource
+from .exceptions import ParameterValidationError
+from .validation import validate_parameters
 
 __all__ = [
     "ComputeClient",
@@ -108,13 +110,26 @@ class ComputeClient:
 
     :param context: An authenticated Evo context.
     :param cache_ttl_seconds: How long a discovered task catalogue is cached.
+    :param validate: Validate parameters against the task schema before submitting
+        (required-field presence). Defaults to ``True``.
+    :param deep_validation: Additionally run full JSON Schema Draft 2020-12 validation.
+        Defaults to ``False``.
     """
 
-    def __init__(self, context: IContext, *, cache_ttl_seconds: float = DEFAULT_CACHE_TTL_SECONDS) -> None:
+    def __init__(
+        self,
+        context: IContext,
+        *,
+        cache_ttl_seconds: float = DEFAULT_CACHE_TTL_SECONDS,
+        validate: bool = True,
+        deep_validation: bool = False,
+    ) -> None:
         self._context = context
         self._org_id: UUID = context.get_org_id()
         self._connector: APIConnector = context.get_connector()
         self._discovery = DiscoveryClient(self._connector, self._org_id, cache_ttl_seconds=cache_ttl_seconds)
+        self._validate = validate
+        self._deep_validation = deep_validation
 
     # -- dynamic namespace ------------------------------------------------- #
 
@@ -142,19 +157,39 @@ class ComputeClient:
 
     # -- execution --------------------------------------------------------- #
 
-    async def arun(self, topic: str, task: str, parameters: dict[str, Any]) -> dict:
-        """Discover the task (cached), submit it, and return the results."""
+    async def arun(
+        self,
+        topic: str,
+        task: str,
+        parameters: dict[str, Any],
+        *,
+        validate: bool | None = None,
+        deep_validation: bool | None = None,
+    ) -> dict:
+        """Discover the task (cached), validate the parameters, submit, and return the results.
+
+        :param validate: Override the client's shallow-validation setting for this call.
+        :param deep_validation: Override the client's deep-validation setting for this call.
+        """
         spec = await self._resolve_spec(topic, task)
+        label = f"{topic}.{_normalise(task)}"
         signature = _signature_from_schema(spec)
         try:
             bound = signature.bind(**parameters)
         except TypeError as error:
-            raise TypeError(f"{topic}.{_normalise(task)}.run(): {error}") from None
+            raise ParameterValidationError(f"{label}.run(): {error}", task=label, errors=[str(error)]) from None
 
         # Forward only what the caller actually passed, so unset optionals fall back to the
         # platform's own defaults while an explicit ``None`` still reaches the wire.
         wire_parameters = dict(bound.arguments)
         preview = bool(wire_parameters.pop("preview", signature.parameters["preview"].default))
+
+        if validate is None:
+            validate = self._validate
+        if deep_validation is None:
+            deep_validation = self._deep_validation
+        if validate:
+            validate_parameters(spec, wire_parameters, deep=deep_validation, task_label=label)
 
         job: JobClient[dict] = await JobClient.submit(
             connector=self._connector,
