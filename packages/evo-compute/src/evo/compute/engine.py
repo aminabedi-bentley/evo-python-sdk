@@ -111,9 +111,10 @@ class ComputeClient:
     :param context: An authenticated Evo context.
     :param cache_ttl_seconds: How long a discovered task catalogue is cached.
     :param validate: Validate parameters against the task schema before submitting
-        (required-field presence). Defaults to ``True``.
+        (required-field presence). Defaults to ``True``. This is the master switch:
+        ``False`` turns off deep validation too, whatever ``deep_validation`` says.
     :param deep_validation: Additionally run full JSON Schema Draft 2020-12 validation.
-        Defaults to ``False``.
+        Defaults to ``False``. Only consulted when ``validate`` is ``True``.
     """
 
     def __init__(
@@ -169,7 +170,9 @@ class ComputeClient:
         """Discover the task (cached), validate the parameters, submit, and return the results.
 
         :param validate: Override the client's shallow-validation setting for this call.
+            The master switch: ``False`` skips deep validation too.
         :param deep_validation: Override the client's deep-validation setting for this call.
+            Only consulted when validation is enabled.
         """
         spec = await self._resolve_spec(topic, task)
         label = f"{topic}.{_normalise(task)}"
@@ -188,6 +191,7 @@ class ComputeClient:
             validate = self._validate
         if deep_validation is None:
             deep_validation = self._deep_validation
+        # ``validate`` is the master switch; deep validation only runs underneath it.
         if validate:
             validate_parameters(spec, wire_parameters, deep=deep_validation, task_label=label)
 

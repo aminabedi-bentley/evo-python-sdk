@@ -198,6 +198,11 @@ def _iter_schema_nodes(node: Any) -> Iterator[dict[str, Any]]:
 def unknown_annotation_keys(schema: dict[str, Any] | None) -> set[str]:
     """Return schema keys that are neither standard JSON Schema nor a known annotation.
 
+    Currently only the conformance test calls this. Open question for GSTAT-233 (resolver):
+    call it at discovery time as well, so a caller on an SDK that predates an annotation the
+    platform now publishes is warned rather than left with a silently under-interpreted
+    schema -- and decide whether that is a warning or a hard failure.
+
     :param schema: A task ``parameters`` or ``results`` JSON Schema (or ``None``).
 
     :return: The set of unrecognised annotation keys; empty when the schema only uses
@@ -268,6 +273,9 @@ def _describe_union(error: ValidationError) -> str | None:
     if len(matched) == 1:
         return "; ".join(_describe(sub) for sub in matched[0])
     if matched:
+        # Two or more branches accept the discriminator value (the tags aren't mutually
+        # exclusive), so the intended one can't be singled out. Decline, and let the generic
+        # "not valid under any of the given schemas" message stand rather than guess.
         return None
 
     # No branch accepted the tag, so the tag itself is the problem.
