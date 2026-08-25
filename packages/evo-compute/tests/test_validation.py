@@ -320,6 +320,37 @@ class TestValidateParameters(unittest.TestCase):
             validate_parameters(spec, {"shape": 1.5}, deep=True)
         self.assertIn("is not valid under any of the given schemas", ctx.exception.errors[0])
 
+    def test_union_with_several_matching_branches_keeps_the_generic_message(self) -> None:
+        """When more than one branch accepts the tag, no branch is guessed at either."""
+        spec = make_spec(
+            {
+                "type": "object",
+                "properties": {
+                    "variogram": {
+                        "discriminator": {"propertyName": "kind"},
+                        "oneOf": [{"$ref": "#/$defs/A"}, {"$ref": "#/$defs/B"}],
+                    }
+                },
+                "required": ["variogram"],
+                "$defs": {
+                    # Neither branch pins ``kind`` with a const, so both accept any kind.
+                    "A": {
+                        "type": "object",
+                        "properties": {"kind": {"type": "string"}, "range": {"type": "number"}},
+                        "required": ["kind", "range"],
+                    },
+                    "B": {
+                        "type": "object",
+                        "properties": {"kind": {"type": "string"}, "scale": {"type": "number"}},
+                        "required": ["kind", "scale"],
+                    },
+                },
+            }
+        )
+        with self.assertRaises(ParameterValidationError) as ctx:
+            validate_parameters(spec, {"variogram": {"kind": "spherical", "range": "wide"}}, deep=True)
+        self.assertIn("is not valid under any of the given schemas", ctx.exception.errors[0])
+
 
 class TestEngineValidation(TestWithConnector):
     """Engine-level tests for the validation toggles (shallow default, deep opt-in)."""
@@ -406,6 +437,27 @@ class TestEngineValidation(TestWithConnector):
             with self.assertRaises(ParameterValidationError):
                 await client.arun("demo", "widget", {"source": "obj-1", "mode": None})
         submit.assert_not_awaited()
+
+    async def test_validate_off_at_the_client_disables_deep_validation_too(self) -> None:
+        """``validate`` is the master switch, so ``deep_validation=True`` under it does nothing."""
+        client = ComputeClient(self.context, validate=False, deep_validation=True)
+        with self.catalogue_response(), self.mock_job_client() as submit:
+            await client.demo.widget.run(source="obj-1", mode="turbo")
+        submit.assert_awaited_once()
+
+    async def test_validate_off_per_call_disables_deep_validation_too(self) -> None:
+        client = ComputeClient(self.context, deep_validation=True)
+        with self.catalogue_response(), self.mock_job_client() as submit:
+            await client.arun("demo", "widget", {"source": "obj-1", "mode": "turbo"}, validate=False)
+        submit.assert_awaited_once()
+
+    async def test_validate_off_per_call_overrides_deep_validation_on_per_call(self) -> None:
+        client = ComputeClient(self.context)
+        with self.catalogue_response(), self.mock_job_client() as submit:
+            await client.arun(
+                "demo", "widget", {"source": "obj-1", "mode": "turbo"}, validate=False, deep_validation=True
+            )
+        submit.assert_awaited_once()
 
 
 class FakeContext:
