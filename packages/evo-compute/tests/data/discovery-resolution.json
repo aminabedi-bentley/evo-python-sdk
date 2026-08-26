@@ -173,7 +173,57 @@
         },
         "required": ["source", "target"]
       },
-      "results": null
+      "results": {
+        "type": "object",
+        "properties": {
+          "message": {"type": "string"},
+          "target": {
+            "type": "object",
+            "output": "geoscience-object",
+            "properties": {
+              "reference": {"type": "string", "format": "uri", "reference_to": "geoscience-object"},
+              "name": {"type": "string"},
+              "description": {"type": ["string", "null"]},
+              "schema_id": {"type": "string"},
+              "attribute": {
+                "type": "object",
+                "output": "attribute",
+                "properties": {
+                  "reference": {
+                    "type": "string",
+                    "reference_to": "attribute",
+                    "attribute_from": "2/reference",
+                    "attribute_path": {
+                      "pointset/[>=1.2,<2]": ["locations.attributes[?attribute_type=='scalar']"],
+                      "block-model/[>=1.0,<2]": ["attributes[?attribute_type=='Float64']"]
+                    }
+                  },
+                  "name": {"type": "string"}
+                }
+              }
+            }
+          },
+          "extras": {
+            "type": ["array", "null"],
+            "items": {
+              "type": "object",
+              "output": "geoscience-object",
+              "properties": {
+                "reference": {"type": "string", "format": "uri", "reference_to": "geoscience-object"},
+                "name": {"type": "string"}
+              }
+            }
+          },
+          "report": {
+            "type": ["object", "null"],
+            "output": "file",
+            "properties": {
+              "reference": {"type": "string", "reference_to": "file"},
+              "name": {"type": "string"}
+            }
+          }
+        }
+      }
     },
     {
       "key": "demo/import",
