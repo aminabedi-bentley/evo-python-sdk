@@ -6,6 +6,12 @@ lint-fix:
 	uv run --only-dev ruff check --fix
 	uv run --only-dev ruff format
 
+stubs-compute:
+	uv run --package evo-compute python -m evo.compute._stubgen generate
+
+check-stubs-compute:
+	uv run --package evo-compute python -m evo.compute._stubgen generate --check
+
 test-common:
 	uv run --package evo-sdk-common pytest packages/evo-sdk-common/tests
 
