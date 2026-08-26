@@ -23,6 +23,8 @@ A call is checked, resolved, checked again and submitted: required parameters fi
 (before anything reaches the network), then :mod:`~evo.compute.resolution` turns the
 caller's objects and attributes into the references the schema declares, then optional
 deep validation runs on that resolved payload -- the form the platform actually receives.
+What comes back is hydrated against the task's ``results`` schema by
+:mod:`~evo.compute.outputs`, so the objects a task wrote can be loaded straight back.
 
 Discovery is performed the first time a task within a topic is ``run(...)``. The
 catalogue is then held by the underlying :class:`~evo.compute.discovery.DiscoveryClient`,
@@ -41,6 +43,7 @@ from .client import JobClient
 from .discovery import DEFAULT_CACHE_TTL_SECONDS, DiscoveryClient
 from .endpoints.models import TaskResource
 from .exceptions import ParameterValidationError
+from .outputs import TaskResult
 from .resolution import ReferenceResolver
 from .validation import validate_parameters
 
@@ -108,7 +111,7 @@ def _signature_from_schema(spec: TaskResource) -> inspect.Signature:
     parameters.append(
         inspect.Parameter("preview", inspect.Parameter.KEYWORD_ONLY, default=bool(spec.feature_flag), annotation=bool)
     )
-    return inspect.Signature(parameters, return_annotation=dict)
+    return inspect.Signature(parameters, return_annotation=TaskResult)
 
 
 class ComputeClient:
@@ -174,8 +177,8 @@ class ComputeClient:
         *,
         validate: bool | None = None,
         deep_validation: bool | None = None,
-    ) -> dict:
-        """Discover the task (cached), resolve and validate the parameters, submit, and return the results.
+    ) -> TaskResult:
+        """Discover the task (cached), resolve and validate the parameters, submit, and hydrate the results.
 
         :param validate: Override the client's shallow-validation setting for this call.
             The master switch: ``False`` skips deep validation too.
@@ -217,7 +220,7 @@ class ComputeClient:
             result_type=dict,
             preview=preview,
         )
-        return await job.wait_for_results()
+        return TaskResult(await job.wait_for_results(), spec.results, self._context)
 
     async def _resolve_spec(self, topic: str, task: str) -> TaskResource:
         """Return the discovery spec for ``topic``/``task``.
@@ -286,7 +289,7 @@ def _make_run(client: ComputeClient, topic: str, task: str):
     discovery is never triggered by attribute access alone.
     """
 
-    async def run(**parameters: Any) -> dict:
+    async def run(**parameters: Any) -> TaskResult:
         try:
             return await client.arun(topic, task, parameters)
         finally:

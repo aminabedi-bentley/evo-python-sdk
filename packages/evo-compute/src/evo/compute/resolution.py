@@ -338,14 +338,12 @@ class ReferenceResolver:
         pointer = node.get("attribute_from")
         if not containers or not pointer:
             return "attributes"
-        owner = _pointer_value(pointer, path, walk)
+        owner = _pointer_value(pointer, path, walk.resolved, walk.supplied)
         if owner is None or (schema := await self._object_schema(owner)) is None:
             return "attributes"
-        for pattern, templates in containers.items():
-            if _schema_matches(schema, pattern):
-                template = templates[0] if isinstance(templates, list) else templates
-                return _container_of(template)
-        return "attributes"
+        if (container := _container_for(containers, schema)) is None:
+            return "attributes"
+        return container
 
     def _frame_from_attribute(
         self, properties: dict[str, Any], value: Any, path: list[str], walk: _Walk
@@ -468,6 +466,20 @@ def _container_of(template: str) -> str:
     return template[:index] if index != -1 else template
 
 
+def _container_for(containers: Any, schema: ObjectSchema) -> str | None:
+    """The ``attribute_path`` container an object of this schema keeps its attributes in.
+
+    ``None`` when the map says nothing about the object's family, which leaves the caller to
+    decide whether to guess or to leave a reference alone.
+    """
+    if not isinstance(containers, dict):
+        return None
+    for pattern, templates in containers.items():
+        if _schema_matches(schema, pattern):
+            return _container_of(templates[0] if isinstance(templates, list) else templates)
+    return None
+
+
 # --------------------------------------------------------------------------- #
 # Value helpers.
 # --------------------------------------------------------------------------- #
@@ -516,18 +528,19 @@ def _resolve_file(value: Any, path: list[str], walk: _Walk) -> str:
     return reference
 
 
-def _pointer_value(pointer: str, path: list[str], walk: _Walk) -> Any:
+def _pointer_value(pointer: str, path: list[str], *roots: dict[str, Any]) -> Any:
     """Follow an ``attribute_from`` pointer to the object the attribute belongs to.
 
     Absolute (``/target/object``) indexes from the payload root. Relative (``1/object``)
     climbs at least that many levels from the attribute's own position -- at least, because
     the platform writes the same pointer whether the attribute sits directly under a frame
     or deeper inside that frame's filter, so the nearest enclosing frame that owns the named
-    object is the intended one. The already-resolved payload is preferred; the caller's
-    original values answer pointers the walk has not reached yet.
+    object is the intended one. ``roots`` are consulted in order, so a resolution pass can
+    prefer the payload it has already resolved and fall back to the caller's original values
+    for pointers the walk has not reached yet.
     """
     if pointer.startswith("/"):
-        return _index(walk, [segment for segment in pointer.split("/") if segment])
+        return _index([segment for segment in pointer.split("/") if segment], roots)
 
     head, _, rest = pointer.partition("/")
     try:
@@ -536,13 +549,13 @@ def _pointer_value(pointer: str, path: list[str], walk: _Walk) -> Any:
         return None
     tail = [segment for segment in rest.split("/") if segment]
     for levels in range(climb, len(path) + 1):
-        if (value := _index(walk, path[:-levels] + tail)) is not None:
+        if (value := _index(path[:-levels] + tail, roots)) is not None:
             return value
     return None
 
 
-def _index(walk: _Walk, segments: list[str]) -> Any:
-    for root in (walk.resolved, walk.supplied):
+def _index(segments: list[str], roots: tuple[dict[str, Any], ...]) -> Any:
+    for root in roots:
         current: Any = root
         for segment in segments:
             if not isinstance(current, dict) or segment not in current:
