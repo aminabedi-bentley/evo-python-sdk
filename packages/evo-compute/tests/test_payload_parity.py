@@ -11,48 +11,51 @@
 
 """Payload parity between the hand-written task runners and the generic engine (GSTAT-287).
 
-Every case describes one job twice: once through the typed runner and once through the
-discovery-driven engine, then asserts that ``JobClient.submit`` was handed the same
-``parameters`` payload from both -- equal in value *and* in type, so that a ``1`` never
-passes for a ``1.0``.
+Each case declares one set of inputs, hands that same set to a typed runner and to the
+discovery-driven engine, and asserts that ``JobClient.submit`` was given the same
+``parameters`` payload by both -- equal in value *and* in type, so a ``1`` never passes
+for a ``1.0``.
 
-The engine side is written out as plain JSON literals on purpose. Dumping the runner's
-model to build the engine call would make every assertion tautological; spelling the
-payload out instead pins down exactly what a generic-engine caller has to send, and fails
-loudly if a runner alias or serializer ever changes shape.
+Feeding both paths the same inputs is the point. It is the difference between the engine
+being a drop-in replacement for a runner and the engine merely being *capable* of the same
+payload if the caller formats it by hand. The engine earns it through
+:mod:`~evo.compute.resolution`, which turns objects and attributes into the references a
+task's schema declares, reusing ``tasks/common/source_target.py`` so that both paths agree
+by construction rather than by coincidence.
+
+Where the two genuinely disagree, a test says so outright instead of hiding it by reshaping
+the input. Only the client-side field defaults do: a runner materialises its own, while the
+engine sends what it was given and leaves the rest to the platform. The resolution gaps this
+suite first exposed were fixed in GSTAT-233 rather than recorded here.
 
 Discovery is mocked rather than recorded, so the suite needs no catalogue fixture and no
-credentials. Each task's schema is taken from the runner's own parameter model, which is
-all the engine reads to bind a call: the wire field names and which of them are required.
-That makes this a test of the two code paths, not of the platform contract -- checking the
-SDK models against live discovery is schema conformance, and is tested separately.
+credentials. :func:`task_spec` derives each task's schema from the runner's own parameter
+model: the wire names, which of them are required, and the reference annotations the
+resolver reads. That makes this a test of the two code paths against each other, not of the
+SDK against the live catalogue -- that is schema conformance, and is tested separately.
 """
 
 from __future__ import annotations
 
 from collections.abc import Iterator
 from contextlib import contextmanager
-from typing import Any
+from typing import Any, get_args
 from unittest import IsolatedAsyncioTestCase, mock
 
 from evo.common.test_tools import ORG as TEST_ORG
 from evo.objects import ObjectReference
 from evo.objects.typed import Attribute, PendingAttribute
 from evo.objects.typed.base import BaseObject
+from pydantic import BaseModel
 
 from evo.compute import ComputeClient, DiscoveryClient, ParameterValidationError, TaskResource
-from evo.compute.tasks import CreateAttribute, SearchNeighborhood, Source, Target
+from evo.compute.tasks import CreateAttribute, SearchNeighborhood, Source, Target, UpdateAttribute
 from evo.compute.tasks.common import Ellipsoid, EllipsoidRanges, Filter, FilterCondition, Rotation
-from evo.compute.tasks.geostatistics.conditioned_simulator import ConSimParameters, ConSimRunner
-from evo.compute.tasks.geostatistics.declustering import DeclusteringRunner, idw, knn
-from evo.compute.tasks.geostatistics.kriging import (
-    BlockDiscretisation,
-    KrigingMethod,
-    KrigingParameters,
-    KrigingRunner,
-)
+from evo.compute.tasks.common.source_target import _convert_object_reference, _get_attribute_expression
+from evo.compute.tasks.geostatistics.conditioned_simulator import ConSimRunner
+from evo.compute.tasks.geostatistics.declustering import DeclusteringGrid, DeclusteringRunner, DeclusteringSource
+from evo.compute.tasks.geostatistics.kriging import BlockDiscretisation, KrigingMethod, KrigingRunner
 from evo.compute.tasks.geostatistics.location_wise import (
-    LocationWiseParameters,
     LocationWiseRunner,
     LocationWiseTarget,
     MeanAboveCutoff,
@@ -118,16 +121,6 @@ def _search(min_samples: int | None = 4) -> SearchNeighborhood:
     )
 
 
-_ELLIPSOID_JSON: dict[str, Any] = {
-    "ellipsoid_ranges": {"major": 200.0, "semi_major": 150.0, "minor": 100.0},
-    "rotation": {"dip_azimuth": 45.0, "dip": 10.0, "pitch": 5.0},
-}
-
-SEARCH_JSON: dict[str, Any] = {"ellipsoid": _ELLIPSOID_JSON, "max_samples": 20, "min_samples": 4}
-
-SEARCH_JSON_WITHOUT_MIN_SAMPLES: dict[str, Any] = {"ellipsoid": _ELLIPSOID_JSON, "max_samples": 20}
-
-
 # --------------------------------------------------------------------------- #
 # Type-strict comparison
 # --------------------------------------------------------------------------- #
@@ -181,6 +174,9 @@ class FakeContext:
     def get_org_id(self):
         return self._org_id
 
+    def get_environment(self):
+        return mock.Mock()
+
 
 class _SubmitCaptured(Exception):
     """Raised in place of a real submission, once the payload has been recorded."""
@@ -195,18 +191,62 @@ def _capture_submit(module: str) -> Iterator[mock.AsyncMock]:
         yield submit
 
 
+_REFERENCE_ANNOTATIONS = {
+    _convert_object_reference: {"reference_to": "geoscience-object"},
+    _get_attribute_expression: {"reference_to": "attribute"},
+}
+
+
+def _annotation_for(field) -> dict[str, str] | None:
+    """The catalogue annotation a model field corresponds to, if it carries a reference.
+
+    The models already say this, in the validator each reference field is annotated with, so
+    reading it back keeps the mocked schema honest without hand-writing any annotations.
+    """
+    for meta in field.metadata:
+        if (annotation := _REFERENCE_ANNOTATIONS.get(getattr(meta, "func", None))) is not None:
+            return annotation
+    if {CreateAttribute, UpdateAttribute} & set(get_args(field.annotation)):
+        return {"target": "attribute"}
+    return None
+
+
+def _models_reachable_from(model: type[BaseModel], seen: dict[str, type[BaseModel]]) -> dict[str, type[BaseModel]]:
+    """Index every model in ``model``'s field graph by name, matching pydantic's ``$defs`` keys."""
+    if model.__name__ in seen:
+        return seen
+    seen[model.__name__] = model
+    for field in model.model_fields.values():
+        for annotation in (field.annotation, *get_args(field.annotation)):
+            for member in (annotation, *get_args(annotation)):
+                if isinstance(member, type) and issubclass(member, BaseModel):
+                    _models_reachable_from(member, seen)
+    return seen
+
+
 def task_spec(runner_cls) -> TaskResource:
     """The discovery spec the engine would fetch for ``runner_cls``, built from its own model.
 
-    Fields the runner folds into another field are ``exclude=True``: inputs to the model that
-    never reach the wire. The live catalogue does not advertise them, so neither does this
-    spec, even though they do appear in the model's validation schema.
+    Two departures from a plain ``model_json_schema`` keep this a fair stand-in for the
+    catalogue. Fields the runner folds into another field are ``exclude=True`` -- inputs to
+    the model that never reach the wire -- and the catalogue does not advertise them. And
+    reference leaves carry the annotations the resolver reads, without which it would leave
+    a caller's objects and attributes untouched.
     """
     model = runner_cls.params_type
     schema = model.model_json_schema(by_alias=True, mode="validation")
     folded = {field.alias or name for name, field in model.model_fields.items() if field.exclude}
     schema["properties"] = {name: prop for name, prop in schema.get("properties", {}).items() if name not in folded}
     schema["required"] = [name for name in schema.get("required", []) if name not in folded]
+
+    models = _models_reachable_from(model, {})
+    for name, block in ((model.__name__, schema), *schema.get("$defs", {}).items()):
+        if (owner := models.get(name)) is None:
+            continue
+        for field_name, field in owner.model_fields.items():
+            key = field.alias or field_name
+            if key in block.get("properties", {}) and (annotation := _annotation_for(field)) is not None:
+                block["properties"][key].update(annotation)
     return TaskResource(topic=runner_cls.topic, name=runner_cls.task, parameters=schema)
 
 
@@ -235,6 +275,18 @@ class PayloadParityTestCase(IsolatedAsyncioTestCase):
                 await getattr(self.client.geostatistics, runner_cls.task.replace("-", "_")).run(**parameters)
         return submit.await_args.kwargs["parameters"]
 
+    async def payload_difference(self, runner_cls, **inputs: Any) -> list[str]:
+        """How the two payloads differ when both paths are given ``inputs``."""
+        runner_payload = await self.runner_payload(runner_cls, runner_cls.params_type(**inputs))
+        engine_payload = await self.engine_payload(runner_cls, **inputs)
+        return payload_differences(runner_payload, engine_payload)
+
+    async def assertSameInputsParity(self, runner_cls, **inputs: Any) -> None:
+        """Require both paths to submit the same payload when handed the same inputs."""
+        differences = await self.payload_difference(runner_cls, **inputs)
+        if differences:
+            self.fail("engine payload diverges from the runner payload:\n  " + "\n  ".join(differences))
+
     def assertPayloadParity(self, runner_payload: dict[str, Any], engine_payload: dict[str, Any]) -> None:
         differences = payload_differences(runner_payload, engine_payload)
         if differences:
@@ -247,123 +299,61 @@ class PayloadParityTestCase(IsolatedAsyncioTestCase):
 
 
 class TestDeclusteringPayloadParity(PayloadParityTestCase):
-    TARGET_JSON = {"object": TARGET_URL, "attribute": {"operation": "create", "name": "weights"}}
-
-    def _target(self) -> Target:
-        return Target(object=TARGET_URL, attribute=CreateAttribute(name="weights"))
-
-    async def test_idw_declustering(self) -> None:
-        """Inverse-distance weighting, with an explicit power."""
-        runner_payload = await self.runner_payload(
-            DeclusteringRunner,
-            idw(source=POINTSET_URL, grid=GRID_URL, target=self._target(), neighborhood=_search(), power=2.5),
-        )
-        engine_payload = await self.engine_payload(
-            DeclusteringRunner,
-            source={"object": POINTSET_URL},
-            grid={"object": GRID_URL},
-            target=self.TARGET_JSON,
-            neighborhood=SEARCH_JSON,
+    def _inputs(self, **overrides: Any) -> dict[str, Any]:
+        inputs: dict[str, Any] = dict(
+            source=DeclusteringSource(object=POINTSET_URL),
+            grid=DeclusteringGrid(object=GRID_URL),
+            target=Target(object=TARGET_URL, attribute=CreateAttribute(name="weights")),
+            neighborhood=_search(),
             power=2.5,
         )
-        self.assertPayloadParity(runner_payload, engine_payload)
+        inputs.update(overrides)
+        return inputs
 
-    async def test_idw_declustering_with_the_default_power(self) -> None:
-        """The runner materialises its own ``power`` default, so the engine has to send it too."""
-        runner_payload = await self.runner_payload(
-            DeclusteringRunner,
-            idw(source=POINTSET_URL, grid=GRID_URL, target=self._target(), neighborhood=_search()),
-        )
-        self.assertEqual(2.0, runner_payload["power"])
-        engine_payload = await self.engine_payload(
-            DeclusteringRunner,
-            source={"object": POINTSET_URL},
-            grid={"object": GRID_URL},
-            target=self.TARGET_JSON,
-            neighborhood=SEARCH_JSON,
-            power=2.0,
-        )
-        self.assertPayloadParity(runner_payload, engine_payload)
+    async def test_inverse_distance_weighting(self) -> None:
+        """The everyday call: source, grid, target and a search, with an explicit power."""
+        await self.assertSameInputsParity(DeclusteringRunner, **self._inputs())
 
-    async def test_knn_declustering_sends_a_null_power(self) -> None:
-        """KNN mode is a literal ``null`` power, not an omitted one; the engine must forward it."""
+    async def test_knn_mode_sends_a_null_power(self) -> None:
+        """KNN mode is a literal ``null`` power, not an omitted one; both paths must forward it."""
         runner_payload = await self.runner_payload(
-            DeclusteringRunner,
-            knn(source=POINTSET_URL, grid=GRID_URL, target=self._target(), neighborhood=_search()),
+            DeclusteringRunner, DeclusteringRunner.params_type(**self._inputs(power=None))
         )
         self.assertIn("power", runner_payload)
         self.assertIsNone(runner_payload["power"])
-        engine_payload = await self.engine_payload(
-            DeclusteringRunner,
-            source={"object": POINTSET_URL},
-            grid={"object": GRID_URL},
-            target=self.TARGET_JSON,
-            neighborhood=SEARCH_JSON,
-            power=None,
+        await self.assertSameInputsParity(DeclusteringRunner, **self._inputs(power=None))
+
+    async def test_a_typed_attribute_target_becomes_a_create_operation(self) -> None:
+        """The target is given as the attribute itself, and both paths expand it the same way."""
+        await self.assertSameInputsParity(
+            DeclusteringRunner, **self._inputs(target=_pending_attribute("weights", TARGET_URL))
         )
-        self.assertPayloadParity(runner_payload, engine_payload)
+
+    async def test_search_without_min_samples_omits_the_key(self) -> None:
+        """An unset ``min_samples`` is dropped by the neighborhood serializer, not sent as null."""
+        runner_payload = await self.runner_payload(
+            DeclusteringRunner, DeclusteringRunner.params_type(**self._inputs(neighborhood=_search(min_samples=None)))
+        )
+        self.assertNotIn("min_samples", runner_payload["neighborhood"])
+        await self.assertSameInputsParity(DeclusteringRunner, **self._inputs(neighborhood=_search(min_samples=None)))
 
     async def test_integer_power_is_not_accepted_as_the_float_the_runner_sends(self) -> None:
-        """Guards the comparison itself: ``2`` must not pass for the runner's ``2.0``."""
+        """Guards the comparison itself: the engine's ``2`` must not pass for the runner's ``2.0``."""
         runner_payload = await self.runner_payload(
-            DeclusteringRunner,
-            idw(source=POINTSET_URL, grid=GRID_URL, target=self._target(), neighborhood=_search(), power=2.0),
+            DeclusteringRunner, DeclusteringRunner.params_type(**self._inputs(power=2.0))
         )
-        engine_payload = await self.engine_payload(
-            DeclusteringRunner,
-            source={"object": POINTSET_URL},
-            grid={"object": GRID_URL},
-            target=self.TARGET_JSON,
-            neighborhood=SEARCH_JSON,
-            power=2,
-        )
+        engine_payload = await self.engine_payload(DeclusteringRunner, **self._inputs(power=2))
         self.assertEqual(
             ["parameters.power: expected float 2.0, got int 2"],
             payload_differences(runner_payload, engine_payload),
         )
 
-    async def test_typed_objects_are_resolved_to_urls(self) -> None:
-        """Notebook callers pass objects, not URLs; the engine caller has to pass the resolved URL."""
-        runner_payload = await self.runner_payload(
+    async def test_bare_objects_fill_in_their_frames(self) -> None:
+        """``source``/``grid`` are an object and nothing else, so the object goes straight in."""
+        await self.assertSameInputsParity(
             DeclusteringRunner,
-            idw(
-                source=_typed_object(POINTSET_URL),
-                grid=_typed_object(GRID_URL),
-                target=_pending_attribute("weights", TARGET_URL),
-                neighborhood=_search(),
-            ),
+            **self._inputs(source=_typed_object(POINTSET_URL), grid=_typed_object(GRID_URL)),
         )
-        engine_payload = await self.engine_payload(
-            DeclusteringRunner,
-            source={"object": POINTSET_URL},
-            grid={"object": GRID_URL},
-            target=self.TARGET_JSON,
-            neighborhood=SEARCH_JSON,
-            power=2.0,
-        )
-        self.assertPayloadParity(runner_payload, engine_payload)
-
-    async def test_search_without_min_samples_omits_the_key(self) -> None:
-        """An unset ``min_samples`` is dropped by the neighborhood serializer, not sent as null."""
-        runner_payload = await self.runner_payload(
-            DeclusteringRunner,
-            idw(
-                source=POINTSET_URL,
-                grid=GRID_URL,
-                target=self._target(),
-                neighborhood=_search(min_samples=None),
-            ),
-        )
-        self.assertNotIn("min_samples", runner_payload["neighborhood"])
-        engine_payload = await self.engine_payload(
-            DeclusteringRunner,
-            source={"object": POINTSET_URL},
-            grid={"object": GRID_URL},
-            target=self.TARGET_JSON,
-            neighborhood=SEARCH_JSON_WITHOUT_MIN_SAMPLES,
-            power=2.0,
-        )
-        self.assertPayloadParity(runner_payload, engine_payload)
 
 
 # --------------------------------------------------------------------------- #
@@ -372,120 +362,70 @@ class TestDeclusteringPayloadParity(PayloadParityTestCase):
 
 
 class TestKrigingPayloadParity(PayloadParityTestCase):
-    SOURCE_JSON = {"object": POINTSET_URL, "attribute": GRADE_ATTRIBUTE}
-    TARGET_JSON = {"object": TARGET_URL, "attribute": {"operation": "create", "name": "kriged_grade"}}
-
-    def _params(self, **overrides: Any) -> KrigingParameters:
-        arguments: dict[str, Any] = dict(
+    def _inputs(self, **overrides: Any) -> dict[str, Any]:
+        # Keyed by wire name throughout: ``KrigingParameters`` populates by alias, so one set
+        # of inputs serves the runner and the engine without any restating.
+        inputs: dict[str, Any] = dict(
             source=Source(object=POINTSET_URL, attribute=GRADE_ATTRIBUTE),
             target=Target(object=TARGET_URL, attribute=CreateAttribute(name="kriged_grade")),
             variogram=VARIOGRAM_URL,
-            search=_search(),
+            neighborhood=_search(),
+            kriging_method=KrigingMethod.ORDINARY,
         )
-        arguments.update(overrides)
-        return KrigingParameters(**arguments)
+        inputs.update(overrides)
+        return inputs
 
     async def test_ordinary_kriging(self) -> None:
-        """The default method is materialised by the runner as a tagged object."""
-        runner_payload = await self.runner_payload(KrigingRunner, self._params())
-        engine_payload = await self.engine_payload(
-            KrigingRunner,
-            source=self.SOURCE_JSON,
-            target=self.TARGET_JSON,
-            variogram=VARIOGRAM_URL,
-            neighborhood=SEARCH_JSON,
-            kriging_method={"type": "ordinary"},
-        )
-        self.assertPayloadParity(runner_payload, engine_payload)
+        """``neighborhood``/``kriging_method`` are the aliases of ``search``/``method``."""
+        await self.assertSameInputsParity(KrigingRunner, **self._inputs())
 
     async def test_simple_kriging_with_block_discretisation(self) -> None:
-        """``method``/``search`` reach the wire under their ``kriging_method``/``neighborhood`` aliases."""
-        runner_payload = await self.runner_payload(
+        """A tagged method object and an optional sub-block frame survive both paths intact."""
+        await self.assertSameInputsParity(
             KrigingRunner,
-            self._params(
-                method=KrigingMethod.simple(mean=12.5),
+            **self._inputs(
+                kriging_method=KrigingMethod.simple(mean=12.5),
                 block_discretisation=BlockDiscretisation(nx=3, ny=3, nz=2),
             ),
         )
-        engine_payload = await self.engine_payload(
-            KrigingRunner,
-            source=self.SOURCE_JSON,
-            target=self.TARGET_JSON,
-            variogram=VARIOGRAM_URL,
-            neighborhood=SEARCH_JSON,
-            kriging_method={"type": "simple", "mean": 12.5},
-            block_discretisation={"nx": 3, "ny": 3, "nz": 2},
-        )
-        self.assertPayloadParity(runner_payload, engine_payload)
 
     async def test_typed_attributes_become_urls_and_jmespath_expressions(self) -> None:
         """An attribute that already exists resolves to a key lookup, and to an *update* target."""
         runner_payload = await self.runner_payload(
             KrigingRunner,
-            self._params(
+            KrigingRunner.params_type(
+                **self._inputs(
+                    source=_existing_attribute("src-key-1", POINTSET_URL, schema_path="locations.attributes"),
+                    target=_existing_attribute("tgt-key-9", TARGET_URL),
+                )
+            ),
+        )
+        self.assertEqual("locations.attributes[?key=='src-key-1']", runner_payload["source"]["attribute"])
+        self.assertEqual(
+            {"operation": "update", "reference": "attributes[?key=='tgt-key-9']"}, runner_payload["target"]["attribute"]
+        )
+        await self.assertSameInputsParity(
+            KrigingRunner,
+            **self._inputs(
                 source=_existing_attribute("src-key-1", POINTSET_URL, schema_path="locations.attributes"),
                 target=_existing_attribute("tgt-key-9", TARGET_URL),
             ),
         )
-        engine_payload = await self.engine_payload(
-            KrigingRunner,
-            source={"object": POINTSET_URL, "attribute": "locations.attributes[?key=='src-key-1']"},
-            target={
-                "object": TARGET_URL,
-                "attribute": {"operation": "update", "reference": "attributes[?key=='tgt-key-9']"},
-            },
-            variogram=VARIOGRAM_URL,
-            neighborhood=SEARCH_JSON,
-            kriging_method={"type": "ordinary"},
-        )
-        self.assertPayloadParity(runner_payload, engine_payload)
 
     async def test_filters_are_folded_into_source_and_target(self) -> None:
-        """``source_filter``/``target_filter`` are not wire fields; they nest under the object they filter."""
+        """``source_filter`` is not a wire field: the runner nests it under what it filters.
+
+        The two paths take the filter differently -- the runner as its own argument, the engine
+        already in place -- so this is the one case that cannot be stated as a single input set.
+        """
+        source_filter = Filter(where=FilterCondition(attribute=GRADE_ATTRIBUTE, operator="greater_than", threshold=0.5))
         runner_payload = await self.runner_payload(
-            KrigingRunner,
-            self._params(
-                source_filter=Filter(
-                    where=FilterCondition(attribute=GRADE_ATTRIBUTE, operator="greater_than", threshold=0.5)
-                ),
-                target_filter=Filter(
-                    where=FilterCondition(
-                        attribute="attributes[?name=='domain']", operator="in", values=["LMS1", "LMS2"]
-                    )
-                ),
-            ),
+            KrigingRunner, KrigingRunner.params_type(**self._inputs(), source_filter=source_filter)
         )
         self.assertNotIn("source_filter", runner_payload)
-        engine_payload = await self.engine_payload(
-            KrigingRunner,
-            source={
-                **self.SOURCE_JSON,
-                "filter": {
-                    "where": {
-                        "type": "condition",
-                        "attribute": GRADE_ATTRIBUTE,
-                        "operator": "greater_than",
-                        "values": None,
-                        "threshold": 0.5,
-                    }
-                },
-            },
-            target={
-                **self.TARGET_JSON,
-                "filter": {
-                    "where": {
-                        "type": "condition",
-                        "attribute": "attributes[?name=='domain']",
-                        "operator": "in",
-                        "values": ["LMS1", "LMS2"],
-                        "threshold": None,
-                    }
-                },
-            },
-            variogram=VARIOGRAM_URL,
-            neighborhood=SEARCH_JSON,
-            kriging_method={"type": "ordinary"},
-        )
+
+        nested = {"object": POINTSET_URL, "attribute": GRADE_ATTRIBUTE, "filter": source_filter.model_dump()}
+        engine_payload = await self.engine_payload(KrigingRunner, **self._inputs(source=nested))
         self.assertPayloadParity(runner_payload, engine_payload)
 
     async def test_the_folded_filter_fields_are_not_offered_as_engine_parameters(self) -> None:
@@ -494,13 +434,24 @@ class TestKrigingPayloadParity(PayloadParityTestCase):
         with self.assertRaises(ParameterValidationError) as caught:
             await self.engine_payload(
                 KrigingRunner,
-                source=self.SOURCE_JSON,
-                target=self.TARGET_JSON,
-                variogram=VARIOGRAM_URL,
-                neighborhood=SEARCH_JSON,
+                **self._inputs(),
                 source_filter={"where": {"type": "condition", "attribute": GRADE_ATTRIBUTE, "operator": "in"}},
             )
         self.assertIn("source_filter", str(caught.exception))
+
+    async def test_an_unset_method_is_defaulted_by_the_runner_only(self) -> None:
+        """DIVERGENCE: the runner materialises its ``method`` default; the engine sends nothing.
+
+        The engine forwards only what the caller passed, leaving the platform to apply its own
+        default. Both reach the same job, but not by the same payload. This one is by design,
+        unlike the resolution gaps this suite found, which were fixed rather than recorded.
+        """
+        inputs = self._inputs()
+        del inputs["kriging_method"]
+        self.assertEqual(
+            ["parameters.kriging_method: missing, expected {'type': 'ordinary'}"],
+            await self.payload_difference(KrigingRunner, **inputs),
+        )
 
 
 # --------------------------------------------------------------------------- #
@@ -509,7 +460,9 @@ class TestKrigingPayloadParity(PayloadParityTestCase):
 
 
 class TestConSimPayloadParity(PayloadParityTestCase):
-    #: The runner fills these in from its own field defaults, so a parity payload must carry them.
+    #: The runner materialises these from its own field defaults, so an engine caller has to
+    #: pass them for the two payloads to agree. Sending them on both paths is what makes this
+    #: one set of inputs rather than two.
     RUNNER_DEFAULTS: dict[str, Any] = {
         "block_discretization": {"nx": 1, "ny": 1, "nz": 1},
         "kriging_method": "simple",
@@ -520,36 +473,27 @@ class TestConSimPayloadParity(PayloadParityTestCase):
         "perform_validation": False,
     }
 
-    def _params(self, **overrides: Any) -> ConSimParameters:
-        arguments: dict[str, Any] = dict(
+    def _inputs(self, **overrides: Any) -> dict[str, Any]:
+        inputs: dict[str, Any] = dict(
             source_object=POINTSET_URL,
             source_attribute=GRADE_ATTRIBUTE,
             target_object=GRID_URL,
             neighborhood=_search(),
             variogram_model=VARIOGRAM_URL,
-        )
-        arguments.update(overrides)
-        return ConSimParameters(**arguments)
-
-    async def test_minimal_conditional_simulation(self) -> None:
-        """Every client-side default the runner applies has to be sent explicitly by the engine."""
-        runner_payload = await self.runner_payload(ConSimRunner, self._params())
-        engine_payload = await self.engine_payload(
-            ConSimRunner,
-            source_object=POINTSET_URL,
-            source_attribute=GRADE_ATTRIBUTE,
-            target_object=GRID_URL,
-            neighborhood=SEARCH_JSON,
-            variogram_model=VARIOGRAM_URL,
             **self.RUNNER_DEFAULTS,
         )
-        self.assertPayloadParity(runner_payload, engine_payload)
+        inputs.update(overrides)
+        return inputs
+
+    async def test_minimal_conditional_simulation(self) -> None:
+        """The flat source shape: object and attribute as separate scalars, not a frame."""
+        await self.assertSameInputsParity(ConSimRunner, **self._inputs())
 
     async def test_multiple_simulations_with_quantiles(self) -> None:
         """Counts stay ints and cutoffs stay floats across both paths."""
-        runner_payload = await self.runner_payload(
+        await self.assertSameInputsParity(
             ConSimRunner,
-            self._params(
+            **self._inputs(
                 number_of_simulations=25,
                 number_of_simulations_to_save=3,
                 random_seed=7,
@@ -557,23 +501,17 @@ class TestConSimPayloadParity(PayloadParityTestCase):
                 probability_above_cutoff=[1.0, 2.5],
             ),
         )
-        engine_payload = await self.engine_payload(
-            ConSimRunner,
-            source_object=POINTSET_URL,
-            source_attribute=GRADE_ATTRIBUTE,
-            target_object=GRID_URL,
-            neighborhood=SEARCH_JSON,
-            variogram_model=VARIOGRAM_URL,
-            **{
-                **self.RUNNER_DEFAULTS,
-                "number_of_simulations": 25,
-                "number_of_simulations_to_save": 3,
-                "random_seed": 7,
-            },
-            location_wise_quantiles=[0.1, 0.5, 0.9],
-            probability_above_cutoff=[1.0, 2.5],
+
+    async def test_unset_defaults_are_supplied_by_the_runner_only(self) -> None:
+        """DIVERGENCE: seven client-side defaults the engine leaves to the platform."""
+        inputs = self._inputs()
+        for name in self.RUNNER_DEFAULTS:
+            del inputs[name]
+        differences = await self.payload_difference(ConSimRunner, **inputs)
+        self.assertEqual(
+            sorted(f"parameters.{name}" for name in self.RUNNER_DEFAULTS),
+            sorted(difference.split(":")[0] for difference in differences),
         )
-        self.assertPayloadParity(runner_payload, engine_payload)
 
 
 # --------------------------------------------------------------------------- #
@@ -582,46 +520,33 @@ class TestConSimPayloadParity(PayloadParityTestCase):
 
 
 class TestLocationWisePayloadParity(PayloadParityTestCase):
-    SOURCE_JSON = {"object": POINTSET_URL, "attribute": SIMULATIONS_ATTRIBUTE}
-    TARGET_JSON = {"object": GRID_URL}
-
-    def _params(self, **overrides: Any) -> LocationWiseParameters:
-        arguments: dict[str, Any] = dict(
+    def _inputs(self, **overrides: Any) -> dict[str, Any]:
+        inputs: dict[str, Any] = dict(
             source=Source(object=POINTSET_URL, attribute=SIMULATIONS_ATTRIBUTE),
             target=LocationWiseTarget(object=GRID_URL),
-        )
-        arguments.update(overrides)
-        return LocationWiseParameters(**arguments)
-
-    async def test_summary_only(self) -> None:
-        """``summary=True`` is the minimal job; the unset statistics blocks stay off the wire."""
-        runner_payload = await self.runner_payload(LocationWiseRunner, self._params(summary=True))
-        engine_payload = await self.engine_payload(
-            LocationWiseRunner,
-            source=self.SOURCE_JSON,
-            target=self.TARGET_JSON,
             summary=True,
         )
-        self.assertPayloadParity(runner_payload, engine_payload)
+        inputs.update(overrides)
+        return inputs
+
+    async def test_summary_only(self) -> None:
+        """The plain-model control: no aliases, no defaults, no folded fields."""
+        await self.assertSameInputsParity(LocationWiseRunner, **self._inputs())
 
     async def test_all_statistics(self) -> None:
         """Quantiles and cutoff lists keep their float element types."""
-        runner_payload = await self.runner_payload(
+        await self.assertSameInputsParity(
             LocationWiseRunner,
-            self._params(
-                summary=True,
+            **self._inputs(
                 quantiles=[0.1, 0.5, 0.9],
                 probability_above_cutoff=ProbabilityAboveCutoff(cutoffs=[1.0, 2.0]),
                 mean_above_cutoff=MeanAboveCutoff(cutoffs=[1.5]),
             ),
         )
-        engine_payload = await self.engine_payload(
-            LocationWiseRunner,
-            source=self.SOURCE_JSON,
-            target=self.TARGET_JSON,
-            summary=True,
-            quantiles=[0.1, 0.5, 0.9],
-            probability_above_cutoff={"cutoffs": [1.0, 2.0]},
-            mean_above_cutoff={"cutoffs": [1.5]},
-        )
-        self.assertPayloadParity(runner_payload, engine_payload)
+
+    async def test_unset_optionals_stay_off_the_wire(self) -> None:
+        """Neither path invents a statistics block the caller never asked for."""
+        runner_payload = await self.runner_payload(LocationWiseRunner, LocationWiseRunner.params_type(**self._inputs()))
+        for unset in ("quantiles", "probability_above_cutoff", "mean_above_cutoff"):
+            self.assertNotIn(unset, runner_payload)
+        await self.assertSameInputsParity(LocationWiseRunner, **self._inputs())
