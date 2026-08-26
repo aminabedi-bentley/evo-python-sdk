@@ -24,9 +24,16 @@ task's schema declares, reusing ``tasks/common/source_target.py`` so that both p
 by construction rather than by coincidence.
 
 Where the two genuinely disagree, a test says so outright instead of hiding it by reshaping
-the input. Only the client-side field defaults do: a runner materialises its own, while the
-engine sends what it was given and leaves the rest to the platform. The resolution gaps this
+the input. Two do: a runner materialises its own client-side field defaults where the engine
+sends only what it was given, and a runner passes a bare attribute name straight through
+where the engine expands it into the JMESPath the platform expects. The resolution gaps this
 suite first exposed were fixed in GSTAT-233 rather than recorded here.
+
+One case is deliberately not stated as a single input set. ``source_filter`` is a runner-only
+argument -- ``exclude=True`` on the model, folded into ``source`` before anything is sent --
+so the catalogue does not advertise it and the engine will not take it. That case compares
+wire shapes instead, and the test beside it pins the rejection so the asymmetry stays visible
+rather than reading as parity.
 
 Discovery is mocked rather than recorded, so the suite needs no catalogue fixture and no
 credentials. :func:`task_spec` derives each task's schema from the runner's own parameter
@@ -412,11 +419,13 @@ class TestKrigingPayloadParity(PayloadParityTestCase):
             ),
         )
 
-    async def test_filters_are_folded_into_source_and_target(self) -> None:
-        """``source_filter`` is not a wire field: the runner nests it under what it filters.
+    async def test_a_folded_filter_reaches_the_wire_as_a_nested_one(self) -> None:
+        """WIRE SHAPE, NOT SAME INPUTS: ``source_filter`` is an argument only the runner has.
 
-        The two paths take the filter differently -- the runner as its own argument, the engine
-        already in place -- so this is the one case that cannot be stated as a single input set.
+        It is ``exclude=True`` on the model and folded into ``source`` before anything is sent,
+        so the catalogue never advertises it and the engine rejects it -- the test below pins
+        that. What is worth asserting is that the shape the runner folds a filter into is the
+        shape an engine caller writes by hand, so this case compares payloads, not inputs.
         """
         source_filter = Filter(where=FilterCondition(attribute=GRADE_ATTRIBUTE, operator="greater_than", threshold=0.5))
         runner_payload = await self.runner_payload(
@@ -451,6 +460,23 @@ class TestKrigingPayloadParity(PayloadParityTestCase):
         self.assertEqual(
             ["parameters.kriging_method: missing, expected {'type': 'ordinary'}"],
             await self.payload_difference(KrigingRunner, **inputs),
+        )
+
+    async def test_a_bare_attribute_name_is_expanded_by_the_engine_only(self) -> None:
+        """DIVERGENCE: the runner passes a bare attribute name through; the engine expands it.
+
+        ``_get_attribute_expression`` treats any string as an expression already written, so a
+        name reaches the platform as a name. The engine reads the leaf's ``reference_to:
+        attribute`` and projects the name into the container that attribute's family keeps its
+        attributes in -- ``attributes`` unless the schema names another through
+        ``attribute_path``, which is the container the typed paths above resolve to as well.
+        Only the engine's payload is one the platform can look the attribute up from.
+        """
+        self.assertEqual(
+            ["parameters.source.attribute: expected 'grade', got \"attributes[?name=='grade']\""],
+            await self.payload_difference(
+                KrigingRunner, **self._inputs(source=Source(object=POINTSET_URL, attribute="grade"))
+            ),
         )
 
 
