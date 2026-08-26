@@ -198,10 +198,11 @@ def _iter_schema_nodes(node: Any) -> Iterator[dict[str, Any]]:
 def unknown_annotation_keys(schema: dict[str, Any] | None) -> set[str]:
     """Return schema keys that are neither standard JSON Schema nor a known annotation.
 
-    Currently only the conformance test calls this. Open question for GSTAT-233 (resolver):
-    call it at discovery time as well, so a caller on an SDK that predates an annotation the
-    platform now publishes is warned rather than left with a silently under-interpreted
-    schema -- and decide whether that is a warning or a hard failure.
+    Two callers, for two audiences. :class:`~evo.compute.discovery.DiscoveryClient` calls it
+    on every fetched catalogue and *warns*, so a caller on an SDK that predates an annotation
+    the platform now publishes learns that the schema is only partly interpreted rather than
+    being blocked by it. The conformance test calls it on the bundled snapshot and *fails*,
+    so the same drift stops a release rather than reaching users as a warning.
 
     :param schema: A task ``parameters`` or ``results`` JSON Schema (or ``None``).
 
