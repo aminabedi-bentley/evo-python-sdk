@@ -40,7 +40,7 @@ from evo.objects import ObjectReference
 from evo.objects.typed import Attribute, PendingAttribute
 from evo.objects.typed.base import BaseObject
 
-from evo.compute import ComputeClient, DiscoveryClient, TaskResource
+from evo.compute import ComputeClient, DiscoveryClient, ParameterValidationError, TaskResource
 from evo.compute.tasks import CreateAttribute, SearchNeighborhood, Source, Target
 from evo.compute.tasks.common import Ellipsoid, EllipsoidRanges, Filter, FilterCondition, Rotation
 from evo.compute.tasks.geostatistics.conditioned_simulator import ConSimParameters, ConSimRunner
@@ -196,12 +196,18 @@ def _capture_submit(module: str) -> Iterator[mock.AsyncMock]:
 
 
 def task_spec(runner_cls) -> TaskResource:
-    """The discovery spec the engine would fetch for ``runner_cls``, built from its own model."""
-    return TaskResource(
-        topic=runner_cls.topic,
-        name=runner_cls.task,
-        parameters=runner_cls.params_type.model_json_schema(by_alias=True, mode="validation"),
-    )
+    """The discovery spec the engine would fetch for ``runner_cls``, built from its own model.
+
+    Fields the runner folds into another field are ``exclude=True``: inputs to the model that
+    never reach the wire. The live catalogue does not advertise them, so neither does this
+    spec, even though they do appear in the model's validation schema.
+    """
+    model = runner_cls.params_type
+    schema = model.model_json_schema(by_alias=True, mode="validation")
+    folded = {field.alias or name for name, field in model.model_fields.items() if field.exclude}
+    schema["properties"] = {name: prop for name, prop in schema.get("properties", {}).items() if name not in folded}
+    schema["required"] = [name for name in schema.get("required", []) if name not in folded]
+    return TaskResource(topic=runner_cls.topic, name=runner_cls.task, parameters=schema)
 
 
 class PayloadParityTestCase(IsolatedAsyncioTestCase):
@@ -481,6 +487,20 @@ class TestKrigingPayloadParity(PayloadParityTestCase):
             kriging_method={"type": "ordinary"},
         )
         self.assertPayloadParity(runner_payload, engine_payload)
+
+    async def test_the_folded_filter_fields_are_not_offered_as_engine_parameters(self) -> None:
+        """Folding a filter is runner-side work, so ``source_filter`` is not a task parameter."""
+        self.assertNotIn("source_filter", task_spec(KrigingRunner).parameters["properties"])
+        with self.assertRaises(ParameterValidationError) as caught:
+            await self.engine_payload(
+                KrigingRunner,
+                source=self.SOURCE_JSON,
+                target=self.TARGET_JSON,
+                variogram=VARIOGRAM_URL,
+                neighborhood=SEARCH_JSON,
+                source_filter={"where": {"type": "condition", "attribute": GRADE_ATTRIBUTE, "operator": "in"}},
+            )
+        self.assertIn("source_filter", str(caught.exception))
 
 
 # --------------------------------------------------------------------------- #
