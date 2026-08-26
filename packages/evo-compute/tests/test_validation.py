@@ -181,8 +181,8 @@ class TestValidateParameters(unittest.TestCase):
 
     # -- reference-leaf relaxation ----------------------------------------- #
 
-    def test_deep_relaxes_reference_leaves(self) -> None:
-        """A ``reference_to`` object leaf accepts a plain string reference under deep validation."""
+    def test_deep_relaxes_a_reference_leaf_declared_as_its_resolved_form(self) -> None:
+        """A leaf typed as the object it resolves to accepts the plain reference instead."""
         spec = make_spec(
             {
                 "type": "object",
@@ -192,8 +192,48 @@ class TestValidateParameters(unittest.TestCase):
         )
         validate_parameters(spec, {"source": "https://example/objects/abc"}, deep=True)  # does not raise
 
+    def test_deep_holds_a_scalar_reference_to_its_declared_type(self) -> None:
+        """A reference transmitted as a string is still checked -- that is what the stub promises."""
+        spec = make_spec(
+            {
+                "type": "object",
+                "properties": {"source": {"type": "string", "format": "uri", "reference_to": "geoscience-object"}},
+                "required": ["source"],
+            }
+        )
+        validate_parameters(spec, {"source": "https://example/objects/abc"}, deep=True)  # does not raise
+        with self.assertRaises(ParameterValidationError) as ctx:
+            validate_parameters(spec, {"source": 12345}, deep=True)
+        self.assertEqual(["source: expected type string, got int"], ctx.exception.errors)
+
+    def test_deep_allows_null_for_a_nullable_scalar_reference(self) -> None:
+        spec = make_spec(
+            {
+                "type": "object",
+                "properties": {"source": {"type": ["string", "null"], "reference_to": "geoscience-object"}},
+                "required": ["source"],
+            }
+        )
+        validate_parameters(spec, {"source": None}, deep=True)  # does not raise
+        with self.assertRaises(ParameterValidationError):
+            validate_parameters(spec, {"source": 12345}, deep=True)
+
+    def test_deep_keeps_the_transmitted_branch_of_a_mixed_declared_type(self) -> None:
+        """Part scalar, part resolved form: the value still has to be one of the two."""
+        spec = make_spec(
+            {
+                "type": "object",
+                "properties": {"source": {"type": ["string", "object"], "reference_to": "geoscience-object"}},
+                "required": ["source"],
+            }
+        )
+        validate_parameters(spec, {"source": "https://example/objects/abc"}, deep=True)  # does not raise
+        validate_parameters(spec, {"source": {"object": "abc"}}, deep=True)  # nor the resolved form
+        with self.assertRaises(ParameterValidationError):
+            validate_parameters(spec, {"source": 12345}, deep=True)
+
     def test_deep_still_requires_reference_presence(self) -> None:
-        """Relaxation accepts any value but does not waive the required check."""
+        """Relaxation loosens the value's shape but does not waive the required check."""
         spec = make_spec(
             {
                 "type": "object",
