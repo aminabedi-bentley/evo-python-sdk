@@ -23,10 +23,14 @@ errors:
 * **Deep** (opt-in): full JSON Schema Draft 2020-12 validation, including ``$ref`` /
   ``$defs`` resolution and discriminated unions, via :mod:`jsonschema`.
 
-Reference leaves (properties carrying a ``reference_to`` annotation) are relaxed to
-accept any value: the concrete object/attribute/file shape the schema declares is
-produced by the reference-resolution layer, not supplied by the caller, so enforcing
-their structural ``type`` here would false-fail. Everything else in the schema is
+Reference leaves (properties carrying a ``reference_to`` annotation) are relaxed, because
+the concrete object/attribute/file shape the schema declares is produced by the
+reference-resolution layer rather than supplied by the caller. The relaxation is only as
+wide as it has to be: a leaf transmitted as a scalar -- every one in the published
+catalogue is a ``string`` URL -- keeps its declared type, which is exactly what the
+generated type stub advertises statically, so the two halves of the contract agree. A leaf
+declared as its resolved object or array form is relaxed to accept any value, since the
+caller legitimately passes a bare reference instead. Everything else in the schema is
 validated normally.
 
 :func:`unknown_annotation_keys` backs the annotation-conformance test that fails CI if
@@ -217,13 +221,32 @@ def unknown_annotation_keys(schema: dict[str, Any] | None) -> set[str]:
     return unknown
 
 
+# Types a reference is actually transmitted as, so its declared type still holds when the
+# caller passes the reference itself.
+_TRANSMITTED_REFERENCE_TYPES: frozenset[str] = frozenset({"string", "integer", "number", "boolean", "null"})
+
+
+def _relaxed_reference(node: dict[str, Any]) -> dict[str, Any]:
+    """The strongest constraint a ``reference_to`` leaf can still be held to.
+
+    Keeps the declared type as soon as one of its members is a form the reference travels
+    as, and drops every constraint only when the leaf describes nothing but the resolved
+    object the caller does not pass.
+    """
+    declared = node.get("type")
+    types = [declared] if isinstance(declared, str) else declared if isinstance(declared, list) else []
+    if not any(entry in _TRANSMITTED_REFERENCE_TYPES for entry in types):
+        return {}
+    return {"type": types[0] if len(types) == 1 else types}
+
+
 def _relax_reference_leaves(node: Any) -> Any:
-    """Deep-copy ``node``, replacing any subschema carrying ``reference_to`` with ``{}``.
+    """Deep-copy ``node``, relaxing any subschema carrying ``reference_to``.
 
     A ``reference_to`` leaf describes the resolved object/attribute/file form the schema
-    wants, which the reference-resolution layer produces. The caller passes a reference
-    (typically a string), so the leaf is relaxed to accept any value; presence is still
-    enforced by the parent's ``required``.
+    wants, which the reference-resolution layer produces. The caller passes a reference, so
+    the leaf keeps only what still applies to the reference itself (see
+    :func:`_relaxed_reference`); presence is still enforced by the parent's ``required``.
 
     Recurses through the same schema positions as :func:`_iter_schema_nodes`, so a literal
     inside ``const``/``enum``/``default`` is copied untouched rather than rewritten.
@@ -231,7 +254,7 @@ def _relax_reference_leaves(node: Any) -> Any:
     if not isinstance(node, dict):
         return node
     if "reference_to" in node:
-        return {}
+        return _relaxed_reference(node)
     relaxed = dict(node)
     for key in (*_SUBSCHEMA_KEYS, *_SUBSCHEMA_LIST_KEYS, *_SUBSCHEMA_MAP_KEYS, "items"):
         if key not in relaxed:

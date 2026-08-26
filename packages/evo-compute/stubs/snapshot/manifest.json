@@ -1,0 +1,21 @@
+{
+  "source": "GET /compute/orgs/{org_id}/tasks?details=true",
+  "captured_at": "2026-08-19",
+  "tasks": [
+    {
+      "topic": "geostatistics",
+      "name": "declustering",
+      "version": "0.5.3"
+    },
+    {
+      "topic": "geostatistics",
+      "name": "kriging-gcp",
+      "version": "0.5.3"
+    },
+    {
+      "topic": "geostatistics",
+      "name": "normal-score-gcp",
+      "version": "0.5.3"
+    }
+  ]
+}
