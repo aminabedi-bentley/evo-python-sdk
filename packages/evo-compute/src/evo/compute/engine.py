@@ -19,6 +19,11 @@ and submit the job::
     client = ComputeClient(context)
     result = await client.geostatistics.kriging_gcp.run(source=..., target=..., ...)
 
+A call is checked, resolved, checked again and submitted: required parameters first
+(before anything reaches the network), then :mod:`~evo.compute.resolution` turns the
+caller's objects and attributes into the references the schema declares, then optional
+deep validation runs on that resolved payload -- the form the platform actually receives.
+
 Discovery is performed the first time a task within a topic is ``run(...)``. The
 catalogue is then held by the underlying :class:`~evo.compute.discovery.DiscoveryClient`,
 so repeated runs are served from there until its cache expires.
@@ -36,6 +41,7 @@ from .client import JobClient
 from .discovery import DEFAULT_CACHE_TTL_SECONDS, DiscoveryClient
 from .endpoints.models import TaskResource
 from .exceptions import ParameterValidationError
+from .resolution import ReferenceResolver
 from .validation import validate_parameters
 
 __all__ = [
@@ -111,8 +117,9 @@ class ComputeClient:
     :param context: An authenticated Evo context.
     :param cache_ttl_seconds: How long a discovered task catalogue is cached.
     :param validate: Validate parameters against the task schema before submitting
-        (required-field presence). Defaults to ``True``. This is the master switch:
-        ``False`` turns off deep validation too, whatever ``deep_validation`` says.
+        (required-field presence, and that referenced objects are of a schema the task
+        supports). Defaults to ``True``. This is the master switch: ``False`` turns off
+        deep validation too, whatever ``deep_validation`` says.
     :param deep_validation: Additionally run full JSON Schema Draft 2020-12 validation.
         Defaults to ``False``. Only consulted when ``validate`` is ``True``.
     """
@@ -129,6 +136,7 @@ class ComputeClient:
         self._org_id: UUID = context.get_org_id()
         self._connector: APIConnector = context.get_connector()
         self._discovery = DiscoveryClient(self._connector, self._org_id, cache_ttl_seconds=cache_ttl_seconds)
+        self._resolver = ReferenceResolver(context)
         self._validate = validate
         self._deep_validation = deep_validation
 
@@ -167,7 +175,7 @@ class ComputeClient:
         validate: bool | None = None,
         deep_validation: bool | None = None,
     ) -> dict:
-        """Discover the task (cached), validate the parameters, submit, and return the results.
+        """Discover the task (cached), resolve and validate the parameters, submit, and return the results.
 
         :param validate: Override the client's shallow-validation setting for this call.
             The master switch: ``False`` skips deep validation too.
@@ -193,7 +201,12 @@ class ComputeClient:
             deep_validation = self._deep_validation
         # ``validate`` is the master switch; deep validation only runs underneath it.
         if validate:
-            validate_parameters(spec, wire_parameters, deep=deep_validation, task_label=label)
+            # Required fields first: a missing parameter is worth reporting before resolution
+            # spends a request loading the objects the other parameters name.
+            validate_parameters(spec, wire_parameters, task_label=label)
+        wire_parameters = await self._resolver.resolve(spec, wire_parameters, check_schemas=validate, task_label=label)
+        if validate and deep_validation:
+            validate_parameters(spec, wire_parameters, deep=True, task_label=label)
 
         job: JobClient[dict] = await JobClient.submit(
             connector=self._connector,

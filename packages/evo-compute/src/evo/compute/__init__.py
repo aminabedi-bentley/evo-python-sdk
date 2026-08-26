@@ -16,6 +16,7 @@ from .discovery import DiscoveryClient
 from .endpoints.models import TaskResource
 from .engine import ComputeClient
 from .exceptions import ParameterValidationError
+from .resolution import ReferenceResolver
 
 __all__ = [
     "ComputeClient",
@@ -24,6 +25,7 @@ __all__ = [
     "JobProgress",
     "JobStatusEnum",
     "ParameterValidationError",
+    "ReferenceResolver",
     "TaskResource",
     "tasks",
 ]
