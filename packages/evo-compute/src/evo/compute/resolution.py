@@ -394,10 +394,28 @@ class ReferenceResolver:
 # --------------------------------------------------------------------------- #
 
 
+def _sole_non_null_branch(node: dict[str, Any]) -> dict[str, Any] | None:
+    """The one real branch of an optional wrapper such as ``anyOf: [X, {"type": "null"}]``.
+
+    The catalogue inlines an optional sub-object and adds ``null`` to its ``type``, but the
+    same schema is just as often written as a union with a null branch. Left uncollapsed,
+    the node carries no ``properties`` of its own and the walk returns everything below it
+    untouched -- a typed attribute inside an optional filter would reach the wire as an
+    object. A tagged union has more than one real branch and is left for the discriminator.
+    """
+    branches = node.get("anyOf") or node.get("oneOf")
+    if not isinstance(branches, list):
+        return None
+    real = [branch for branch in branches if isinstance(branch, dict) and branch.get("type") != "null"]
+    return real[0] if len(real) == 1 and len(real) < len(branches) else None
+
+
 def _deref(node: Any, root: dict[str, Any]) -> dict[str, Any]:
-    """Resolve a local ``$ref``, keeping any annotation written alongside it."""
+    """Resolve a local ``$ref`` and collapse an optional wrapper, keeping annotations alongside."""
     if not isinstance(node, dict):
         return {}
+    if (branch := _sole_non_null_branch(node)) is not None:
+        node = {**{key: value for key, value in node.items() if key not in ("anyOf", "oneOf")}, **branch}
     reference = node.get("$ref")
     if not isinstance(reference, str) or not reference.startswith("#/"):
         return node

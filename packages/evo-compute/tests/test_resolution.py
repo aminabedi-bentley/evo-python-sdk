@@ -318,6 +318,24 @@ class TestAttributeReferences(ResolutionTestCase):
             [condition["attribute"] for condition in filters],
         )
 
+    async def test_an_optional_filter_written_as_a_union_is_walked_too(self) -> None:
+        """``anyOf: [Filter, null]`` describes the same node as a nullable inline object.
+
+        The catalogue inlines an optional sub-object and adds ``null`` to its ``type``, but a
+        schema generated from a model writes the union instead. Both have to be descended
+        into, or a reference inside an optional filter reaches the wire unresolved.
+        """
+        with self.objects_service():
+            resolved = await self.resolve(
+                source={"object": POINTSET_URL, "attribute": "grade"},
+                target={
+                    "object": TARGET_URL,
+                    "attribute": {"operation": "create", "name": "estimate"},
+                    "filter": {"where": {"type": "condition", "operator": "equal", "attribute": "domain"}},
+                },
+            )
+        self.assertEqual("locations.attributes[?name=='domain']", resolved["target"]["filter"]["where"]["attribute"])
+
 
 class TestTargetAttributes(ResolutionTestCase):
     """``target: attribute`` -- create a new attribute, or update an existing one."""
