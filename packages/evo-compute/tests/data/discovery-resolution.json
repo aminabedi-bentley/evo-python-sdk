@@ -71,6 +71,7 @@
               "filter": {
                 "type": "object",
                 "additionalProperties": false,
+                "composite": "filter",
                 "default": null,
                 "properties": {
                   "where": {"$ref": "#/$defs/FilterExpression"}

@@ -44,6 +44,7 @@ _APPENDIX_B_VOCABULARY = frozenset(
         "attribute_path",
         "target",
         "discriminator",
+        "composite",
     }
 )
 
@@ -84,6 +85,7 @@ class TestSchemaAnnotationConformance(unittest.TestCase):
                     "supported_schemas": ["x"],
                 },
                 "attr": {"type": "string", "reference_to": "attribute", "attribute_from": "0/source"},
+                "filter": {"type": ["object", "null"], "composite": "filter"},
             },
             "$defs": {
                 "Union": {

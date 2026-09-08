@@ -255,11 +255,11 @@ class TestDiscoveryClient(TestWithConnector):
 
     async def test_an_unrecognised_annotation_is_warned_about_not_raised(self) -> None:
         """The platform moving ahead of the SDK must not stop a caller from running a task."""
-        with self.set_discovery_response(self.catalogue_with_annotation("composite")):
+        with self.set_discovery_response(self.catalogue_with_annotation("invented_here")):
             with self.assertLogs("compute.discovery", level="WARNING") as logged:
                 tasks = await self.client.list_tasks()
         self.assertEqual(len(self.catalogue["results"]), len(tasks))
-        self.assertIn("'composite'", logged.output[0])
+        self.assertIn("'invented_here'", logged.output[0])
         self.assertIn(f"{tasks[0].topic}.{tasks[0].name}", logged.output[0])
 
     async def test_a_catalogue_the_sdk_fully_understands_says_nothing(self) -> None:
@@ -270,7 +270,7 @@ class TestDiscoveryClient(TestWithConnector):
 
     async def test_the_same_annotation_is_not_reported_again_on_a_refetch(self) -> None:
         """One line per unknown key, not one per cache expiry."""
-        with self.set_discovery_response(self.catalogue_with_annotation("composite")):
+        with self.set_discovery_response(self.catalogue_with_annotation("invented_here")):
             with mock.patch.object(discovery.logger, "warning") as warning:
                 await self.client.list_tasks()
                 self.clock.advance(DEFAULT_CACHE_TTL_SECONDS + 1)
