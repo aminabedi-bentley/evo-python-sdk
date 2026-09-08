@@ -44,6 +44,7 @@ _APPENDIX_B_VOCABULARY = frozenset(
         "attribute_path",
         "target",
         "discriminator",
+        "composite",
     }
 )
 
@@ -58,13 +59,13 @@ class TestSchemaAnnotationConformance(unittest.TestCase):
         self.assertEqual(_APPENDIX_B_VOCABULARY, KNOWN_SCHEMA_ANNOTATIONS)
 
     def test_bundled_catalogue_uses_only_known_annotations(self) -> None:
-        catalogue = load_test_data("discovery-tasks.json")
         offenders: dict[str, set[str]] = {}
-        for result in catalogue["results"]:
-            task = TaskResource.model_validate(result)
-            unknown = _unknown_keys_for_task(task)
-            if unknown:
-                offenders[task.name] = unknown
+        for fixture in ("discovery-tasks.json", "discovery-resolution.json"):
+            for result in load_test_data(fixture)["results"]:
+                task = TaskResource.model_validate(result)
+                unknown = _unknown_keys_for_task(task)
+                if unknown:
+                    offenders[f"{fixture}:{task.name}"] = unknown
         self.assertEqual({}, offenders, f"unknown schema annotations found: {offenders}")
 
     def test_unknown_annotation_is_flagged(self) -> None:
@@ -84,6 +85,7 @@ class TestSchemaAnnotationConformance(unittest.TestCase):
                     "supported_schemas": ["x"],
                 },
                 "attr": {"type": "string", "reference_to": "attribute", "attribute_from": "0/source"},
+                "filter": {"type": ["object", "null"], "composite": "filter"},
             },
             "$defs": {
                 "Union": {
