@@ -489,8 +489,8 @@ class TestBareObjectFrames(ResolutionTestCase):
         self.assertEqual({"object": BLOCK_MODEL_URL}, await self.resolve_grid({"object": BLOCK_MODEL_URL}))
 
 
-class TestEngineResolution(TestWithConnector):
-    """The engine resolves between its two validation passes, then submits the resolved payload."""
+class EngineResolutionTestCase(TestWithConnector):
+    """A client over the ``demo`` catalogue, with the objects service and job client stubbed out."""
 
     def setUp(self) -> None:
         super().setUp()
@@ -522,6 +522,10 @@ class TestEngineResolution(TestWithConnector):
 
         with mock.patch("evo.compute.resolution.DownloadedObject.from_context", mock.AsyncMock(side_effect=load)):
             yield
+
+
+class TestEngineResolution(EngineResolutionTestCase):
+    """The engine resolves between its two validation passes, then submits the resolved payload."""
 
     async def test_run_submits_the_resolved_payload(self) -> None:
         client = ComputeClient(self.context)
@@ -558,3 +562,51 @@ class TestEngineResolution(TestWithConnector):
                     await client.demo.estimate.run(source={"object": POINTSET_URL, "attribute": "grade"})
         loader.assert_not_awaited()
         submit.assert_not_awaited()
+
+
+class TestSupportedSchemaSwitch(EngineResolutionTestCase):
+    """``check_schemas`` is independent of ``validate``, defaulting to follow it."""
+
+    UNSUPPORTED = ObjectSchema("objects", "triangle-mesh", SchemaVersion(2, 1, 0))
+
+    async def run_with_an_unsupported_source(self, client: ComputeClient, **overrides: Any) -> mock.AsyncMock:
+        with self.catalogue_response(), self.objects_service(), self.mock_job_client() as submit:
+            await client.arun(
+                "demo",
+                "estimate",
+                {
+                    "source": {"object": typed_object(POINTSET_URL, self.UNSUPPORTED), "attribute": "grade"},
+                    "target": {"object": typed_object(TARGET_URL), "attribute": "estimate"},
+                },
+                **overrides,
+            )
+        return submit
+
+    async def test_the_check_follows_validation_by_default(self) -> None:
+        for validate, expect_rejection in ((True, True), (False, False)):
+            with self.subTest(validate=validate):
+                client = ComputeClient(self.context, validate=validate)
+                if expect_rejection:
+                    with self.assertRaises(ParameterValidationError):
+                        await self.run_with_an_unsupported_source(client)
+                else:
+                    submit = await self.run_with_an_unsupported_source(client)
+                    submit.assert_awaited_once()
+
+    async def test_the_check_survives_validation_being_turned_off(self) -> None:
+        """The guard that catches an object the task cannot read is worth keeping on its own."""
+        client = ComputeClient(self.context, validate=False, check_schemas=True)
+        with self.assertRaises(ParameterValidationError) as ctx:
+            await self.run_with_an_unsupported_source(client)
+        self.assertIn("triangle-mesh", str(ctx.exception))
+
+    async def test_the_check_can_be_dropped_while_validation_stays_on(self) -> None:
+        """Skipping it costs the request each referenced object would otherwise need."""
+        client = ComputeClient(self.context, check_schemas=False)
+        submit = await self.run_with_an_unsupported_source(client)
+        submit.assert_awaited_once()
+
+    async def test_the_client_setting_is_overridden_per_call(self) -> None:
+        client = ComputeClient(self.context, check_schemas=False)
+        with self.assertRaises(ParameterValidationError):
+            await self.run_with_an_unsupported_source(client, check_schemas=True)

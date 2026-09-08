@@ -119,12 +119,21 @@ class ComputeClient:
 
     :param context: An authenticated Evo context.
     :param cache_ttl_seconds: How long a discovered task catalogue is cached.
-    :param validate: Validate parameters against the task schema before submitting
-        (required-field presence, and that referenced objects are of a schema the task
-        supports). Defaults to ``True``. This is the master switch: ``False`` turns off
-        deep validation too, whatever ``deep_validation`` says.
+    :param validate: Check the parameters against the task's JSON Schema before submitting
+        (required-field presence, and, under ``deep_validation``, the whole payload).
+        Defaults to ``True``. ``False`` turns off deep validation too, whatever
+        ``deep_validation`` says. It does *not* make the call unchecked: the parameters are
+        still bound to the signature synthesised from the schema, so an unknown or missing
+        required argument is still rejected. That is how the payload is built, not a
+        validation pass, and there is no useful call to make without it.
     :param deep_validation: Additionally run full JSON Schema Draft 2020-12 validation.
         Defaults to ``False``. Only consulted when ``validate`` is ``True``.
+    :param check_schemas: Check that each referenced geoscience object is of a schema the
+        task declares support for. Defaults to following ``validate``. Independent of it
+        because the cost and the question differ: schema validation is local and free,
+        while this loads each referenced object's metadata. Pass ``False`` to keep
+        validation but skip the requests, or ``True`` alongside ``validate=False`` to keep
+        the guard that catches an object the task cannot read.
     """
 
     def __init__(
@@ -134,6 +143,7 @@ class ComputeClient:
         cache_ttl_seconds: float = DEFAULT_CACHE_TTL_SECONDS,
         validate: bool = True,
         deep_validation: bool = False,
+        check_schemas: bool | None = None,
     ) -> None:
         self._context = context
         self._org_id: UUID = context.get_org_id()
@@ -142,6 +152,7 @@ class ComputeClient:
         self._resolver = ReferenceResolver(context)
         self._validate = validate
         self._deep_validation = deep_validation
+        self._check_schemas = check_schemas
 
     # -- dynamic namespace ------------------------------------------------- #
 
@@ -177,13 +188,17 @@ class ComputeClient:
         *,
         validate: bool | None = None,
         deep_validation: bool | None = None,
+        check_schemas: bool | None = None,
     ) -> TaskResult:
         """Discover the task (cached), resolve and validate the parameters, submit, and hydrate the results.
 
-        :param validate: Override the client's shallow-validation setting for this call.
-            The master switch: ``False`` skips deep validation too.
+        :param validate: Override the client's schema-validation setting for this call.
+            ``False`` skips deep validation too, but never the signature binding that
+            builds the payload.
         :param deep_validation: Override the client's deep-validation setting for this call.
             Only consulted when validation is enabled.
+        :param check_schemas: Override the client's supported-schema setting for this call.
+            Falls back to ``validate`` when neither is set.
         """
         spec = await self._resolve_spec(topic, task)
         label = f"{topic}.{_normalise(task)}"
@@ -202,12 +217,16 @@ class ComputeClient:
             validate = self._validate
         if deep_validation is None:
             deep_validation = self._deep_validation
-        # ``validate`` is the master switch; deep validation only runs underneath it.
+        if check_schemas is None:
+            check_schemas = self._check_schemas if self._check_schemas is not None else validate
+        # ``validate`` masters the schema checks; ``check_schemas`` stands on its own.
         if validate:
             # Required fields first: a missing parameter is worth reporting before resolution
             # spends a request loading the objects the other parameters name.
             validate_parameters(spec, wire_parameters, task_label=label)
-        wire_parameters = await self._resolver.resolve(spec, wire_parameters, check_schemas=validate, task_label=label)
+        wire_parameters = await self._resolver.resolve(
+            spec, wire_parameters, check_schemas=check_schemas, task_label=label
+        )
         if validate and deep_validation:
             validate_parameters(spec, wire_parameters, deep=True, task_label=label)
 
