@@ -231,20 +231,39 @@ def _models_reachable_from(model: type[BaseModel], seen: dict[str, type[BaseMode
     return seen
 
 
+def _renest_folded_filters(schema: dict[str, Any], folded: dict[str, Any]) -> None:
+    """Advertise a folded filter where the payload carries it, tagged as the catalogue tags it.
+
+    ``source_filter`` is an input to the model that never reaches the wire: the serializer
+    writes it to ``source.filter``. The catalogue describes the wire, so it advertises the
+    filter under ``source`` and marks it ``composite: "filter"`` -- the annotation for a
+    sub-object the platform composes from a group of fields.
+    """
+    for name, prop in folded.items():
+        owner, _, leaf = name.rpartition("_")
+        if leaf != "filter":
+            continue
+        reference = schema.get("properties", {}).get(owner, {}).get("$ref", "")
+        if (block := schema.get("$defs", {}).get(reference.rpartition("/")[2])) is not None:
+            block.setdefault("properties", {})[leaf] = dict(prop, composite="filter")
+
+
 def task_spec(runner_cls) -> TaskResource:
     """The discovery spec the engine would fetch for ``runner_cls``, built from its own model.
 
-    Two departures from a plain ``model_json_schema`` keep this a fair stand-in for the
+    Three departures from a plain ``model_json_schema`` keep this a fair stand-in for the
     catalogue. Fields the runner folds into another field are ``exclude=True`` -- inputs to
-    the model that never reach the wire -- and the catalogue does not advertise them. And
-    reference leaves carry the annotations the resolver reads, without which it would leave
-    a caller's objects and attributes untouched.
+    the model that never reach the wire -- so they are advertised where the payload carries
+    them rather than at the top level. And reference leaves carry the annotations the
+    resolver reads, without which it would leave a caller's objects and attributes untouched.
     """
     model = runner_cls.params_type
     schema = model.model_json_schema(by_alias=True, mode="validation")
+    properties = schema.get("properties", {})
     folded = {field.alias or name for name, field in model.model_fields.items() if field.exclude}
-    schema["properties"] = {name: prop for name, prop in schema.get("properties", {}).items() if name not in folded}
+    schema["properties"] = {name: prop for name, prop in properties.items() if name not in folded}
     schema["required"] = [name for name in schema.get("required", []) if name not in folded]
+    _renest_folded_filters(schema, {name: properties[name] for name in folded if name in properties})
 
     models = _models_reachable_from(model, {})
     for name, block in ((model.__name__, schema), *schema.get("$defs", {}).items()):
@@ -447,6 +466,44 @@ class TestKrigingPayloadParity(PayloadParityTestCase):
                 source_filter={"where": {"type": "condition", "attribute": GRADE_ATTRIBUTE, "operator": "in"}},
             )
         self.assertIn("source_filter", str(caught.exception))
+
+    async def test_references_inside_a_composite_filter_are_resolved(self) -> None:
+        """WIRE SHAPE, NOT SAME INPUTS: a ``composite`` node is walked like any other.
+
+        The catalogue tags ``source.filter`` ``composite: "filter"``. That annotation only
+        names the group of fields the platform composes, so it must not stop resolution at
+        the node: the attribute the condition filters on carries ``reference_to: attribute``
+        and has to reach the wire as an expression from both paths.
+
+        The engine caller spells out ``values: None`` because the runner does. Its serializer
+        dumps the filter model whole, and unlike the top-level payload that dump keeps the
+        unset keys, so an engine caller matching it has to send them too.
+        """
+        attribute = _existing_attribute("filter-key-2", POINTSET_URL, schema_path="locations.attributes")
+        source_filter = Filter(where=FilterCondition(attribute=attribute, operator="greater_than", threshold=0.5))
+        runner_payload = await self.runner_payload(
+            KrigingRunner, KrigingRunner.params_type(**self._inputs(), source_filter=source_filter)
+        )
+
+        nested = {
+            "object": POINTSET_URL,
+            "attribute": GRADE_ATTRIBUTE,
+            "filter": {
+                "where": {
+                    "type": "condition",
+                    "attribute": attribute,
+                    "operator": "greater_than",
+                    "threshold": 0.5,
+                    "values": None,
+                }
+            },
+        }
+        engine_payload = await self.engine_payload(KrigingRunner, **self._inputs(source=nested))
+
+        self.assertEqual(
+            "locations.attributes[?key=='filter-key-2']", engine_payload["source"]["filter"]["where"]["attribute"]
+        )
+        self.assertPayloadParity(runner_payload, engine_payload)
 
     async def test_an_unset_method_is_defaulted_by_the_runner_only(self) -> None:
         """DIVERGENCE: the runner materialises its ``method`` default; the engine sends nothing.
