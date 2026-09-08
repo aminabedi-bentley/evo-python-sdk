@@ -59,6 +59,7 @@ KNOWN_SCHEMA_ANNOTATIONS: frozenset[str] = frozenset(
         "attribute_path",
         "target",
         "discriminator",
+        "composite",
     }
 )
 """The closed set of non-JSON-Schema annotation keys the engine understands.
@@ -66,6 +67,12 @@ KNOWN_SCHEMA_ANNOTATIONS: frozenset[str] = frozenset(
 Audited across the published task catalogue (see the design doc's Appendix B). The
 annotation-conformance test fails if a schema uses any annotation outside this set,
 flagging that the engine needs updating before the new task can be handled generically.
+
+``composite`` names a sub-object the platform composes from several fields (the published
+``kriging-gcp`` schema tags ``source.filter`` and ``target.filter`` with ``composite:
+filter``). It is descriptive only: the node it marks is an ordinary subschema that
+resolution and validation already walk, so the engine records the key as understood rather
+than reporting every discovery of a filtered task as vocabulary drift.
 """
 
 
@@ -198,10 +205,11 @@ def _iter_schema_nodes(node: Any) -> Iterator[dict[str, Any]]:
 def unknown_annotation_keys(schema: dict[str, Any] | None) -> set[str]:
     """Return schema keys that are neither standard JSON Schema nor a known annotation.
 
-    Currently only the conformance test calls this. Open question for GSTAT-233 (resolver):
-    call it at discovery time as well, so a caller on an SDK that predates an annotation the
-    platform now publishes is warned rather than left with a silently under-interpreted
-    schema -- and decide whether that is a warning or a hard failure.
+    Two callers, for two audiences. :class:`~evo.compute.discovery.DiscoveryClient` calls it
+    on every fetched catalogue and *warns*, so a caller on an SDK that predates an annotation
+    the platform now publishes learns that the schema is only partly interpreted rather than
+    being blocked by it. The conformance test calls it on the bundled snapshot and *fails*,
+    so the same drift stops a release rather than reaching users as a warning.
 
     :param schema: A task ``parameters`` or ``results`` JSON Schema (or ``None``).
 
