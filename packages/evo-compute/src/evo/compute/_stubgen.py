@@ -29,12 +29,17 @@ The runtime stays fully generic: a task published after the snapshot still runs,
 just not statically known until the snapshot is refreshed. That is the deliberate trade —
 total runtime breadth, point-in-time static breadth. :meth:`ComputeClient.arun` is the
 typed escape hatch for anything the stub does not know about.
+
+A task with an override (see :mod:`evo.compute.overrides`) is the one case where the schema
+is *not* what the caller meets, so nothing is generated for it: the stub imports the runner
+and lets the checker read the annotations that are already on it.
 """
 
 from __future__ import annotations
 
 import argparse
 import ast
+import inspect
 import json
 import keyword
 import re
@@ -44,6 +49,7 @@ from pathlib import Path
 from typing import Any
 
 from .endpoints.models import TaskResource
+from .overrides import load_override
 
 __all__ = [
     "capture_snapshot",
@@ -52,6 +58,8 @@ __all__ = [
 ]
 
 _PACKAGE_DIR = Path(__file__).resolve().parent
+
+_IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 DEFAULT_SNAPSHOT_DIR = _PACKAGE_DIR.parents[2] / "stubs" / "snapshot"
 """The catalogue snapshot checked into the repository, next to the package sources."""
 
@@ -519,7 +527,7 @@ def _header(snapshot_dir: Path) -> list[str]:
     ]
 
 
-def _render_client(stubs: list[_TaskStub], blocking: bool = False) -> list[str]:
+def _render_client(topics: list[str], blocking: bool = False) -> list[str]:
     name = "SyncComputeClient" if blocking else "ComputeClient"
     entry = "blocking" if blocking else "asynchronous"
     other = "ComputeClient" if blocking else "SyncComputeClient"
@@ -562,19 +570,102 @@ def _render_client(stubs: list[_TaskStub], blocking: bool = False) -> list[str]:
         "    def __dir__(self) -> list[str]: ...",
         "    def __repr__(self) -> str: ...",
     ]
-    lines.extend(
-        f"    {topic}: _{'Sync' if blocking else ''}{_camel(topic)}Tasks"
-        for topic in sorted({stub.topic for stub in stubs})
-    )
+    lines.extend(f"    {topic}: _{'Sync' if blocking else ''}{_camel(topic)}Tasks" for topic in sorted(topics))
     return lines
+
+
+def _override_runner(task: TaskResource) -> tuple[str, str] | None:
+    """The module and class of the runner that owns ``task``, or ``None`` if it is generic.
+
+    The runner class is whatever the module's ``bind`` is annotated to return. Under
+    ``from __future__ import annotations`` that annotation arrives as a string, which is the
+    name wanted here either way.
+    """
+    module = load_override(task.topic, task.name.replace("-", "_"))
+    if module is None:
+        return None
+    annotation = inspect.signature(module.bind).return_annotation
+    return module.__name__.removeprefix("evo.compute"), getattr(annotation, "__name__", annotation)
+
+
+def _render_blocking_override(
+    task: TaskResource, module_path: str, runner_name: str, class_name: str
+) -> tuple[list[str], str]:
+    """A blocking mirror of a hand-written runner, copied from that runner's own signature.
+
+    ``SyncComputeClient`` wraps an override so the call blocks, and the stub has to say so --
+    the runner's annotations are the only description of the task there is, since an
+    overridden task is never generated. The return type is left alone: what comes back is the
+    hand-written result, whose own members stay awaitable on both paths.
+
+    :return: The imports the copied annotations need, and the rendered class.
+    """
+    module = load_override(task.topic, _identifier_name(task.name))
+    assert module is not None, "only called for a task an override claims"
+    runner = getattr(module, runner_name)
+    signature = inspect.signature(runner.run)
+
+    # Under ``from __future__ import annotations`` these arrive as source text, which is what
+    # the stub wants; whatever of it the override module defines has to be imported by name.
+    written = [str(parameter.annotation) for parameter in signature.parameters.values()] + [
+        str(signature.return_annotation)
+    ]
+    needed = sorted({name for text in written for name in _IDENTIFIER.findall(text) if hasattr(module, name)})
+    imports = [_import_from(module_path, needed)] if needed else []
+
+    lines = [f"class {class_name}:"]
+    if description := inspect.getdoc(runner):
+        lines.append(_docstring(description, "    "))
+        lines.append("")
+    lines.append("    def run(")
+    lines.append("        self,")
+    lines.append("        *,")
+    for name, parameter in signature.parameters.items():
+        if name == "self":
+            continue
+        default = " = ..." if parameter.default is not inspect.Parameter.empty else ""
+        lines.append(f"        {name}: {parameter.annotation}{default},")
+    lines.append(f"    ) -> {signature.return_annotation}: ...")
+    return imports, "\n".join(lines)
+
+
+def _identifier_name(name: str) -> str:
+    return name.replace("-", "_")
+
+
+def _import_from(module_path: str, names: list[str]) -> str:
+    """``from X import a, b``, wrapped the way the formatter would if it runs long."""
+    single = f"from {module_path} import {', '.join(names)}"
+    if len(single) <= _LINE_LENGTH:
+        return single
+    return "\n".join([f"from {module_path} import (", *(f"    {name}," for name in names), ")"])
 
 
 def _render(tasks: list[TaskResource], snapshot_dir: Path) -> str:
     ordered = sorted(tasks, key=lambda task: (task.topic, task.name))
-    awaited = [_TaskRenderer(task).render() for task in ordered]
-    # The blocking mirror reuses the parameter types verbatim; only the results differ.
-    blocking = [_TaskRenderer(task, blocking=True).render(stub.run_parameters) for task, stub in zip(ordered, awaited)]
-    stubs = [*awaited, *blocking]
+
+    stubs: list[_TaskStub] = []
+    override_imports: list[str] = []
+    override_blocks: list[str] = []
+    members: dict[str, list[tuple[str, str]]] = {}
+    sync_members: dict[str, list[tuple[str, str]]] = {}
+    for task in ordered:
+        attribute = task.name.replace("-", "_")
+        class_name = f"_{_camel(task.topic)}{_camel(task.name)}"
+        sync_name = f"_Sync{_camel(task.topic)}{_camel(task.name)}"
+        if (runner := _override_runner(task)) is None:
+            awaited = _TaskRenderer(task).render()
+            stubs.append(awaited)
+            # The blocking mirror reuses the parameter types verbatim; only the results differ.
+            stubs.append(_TaskRenderer(task, blocking=True).render(awaited.run_parameters))
+        else:
+            module, name = runner
+            override_imports.append(f"from {module} import {name} as {class_name}")
+            imports, block = _render_blocking_override(task, module, name, sync_name)
+            override_imports.extend(imports)
+            override_blocks.append(block)
+        members.setdefault(task.topic, []).append((attribute, class_name))
+        sync_members.setdefault(task.topic, []).append((attribute, sync_name))
 
     blocks: list[str] = []
     for stub in stubs:
@@ -600,19 +691,20 @@ def _render(tasks: list[TaskResource], snapshot_dir: Path) -> str:
             lines.append(f"    ) -> {stub.return_type}: ...")
         blocks.append("\n".join(lines))
 
-    for family in (awaited, blocking):
-        for topic in sorted({stub.topic for stub in family}):
-            in_topic = [stub for stub in family if stub.topic == topic]
+    blocks.extend(override_blocks)
+
+    for blocking, family in ((False, members), (True, sync_members)):
+        for topic, entries in sorted(family.items()):
             lines = [
-                f"class {in_topic[0].topic_class}:",
+                f"class _{'Sync' if blocking else ''}{_camel(topic)}Tasks:",
                 _docstring(f"Tasks published under the ``{topic}`` topic.", "    "),
                 "",
             ]
-            lines.extend(f"    {stub.attribute}: {stub.class_name}" for stub in in_topic)
+            lines.extend(f"    {attribute}: {class_name}" for attribute, class_name in entries)
             blocks.append("\n".join(lines))
 
-    blocks.append("\n".join(_render_client(awaited)))
-    blocks.append("\n".join(_render_client(blocking, blocking=True)))
+    blocks.append("\n".join(_render_client(sorted(members))))
+    blocks.append("\n".join(_render_client(sorted(sync_members), blocking=True)))
 
     body = "\n\n".join(blocks)
     used = {name: alias for name, alias in _REFERENCE_ALIASES.items() if re.search(rf"\b{name}\b", body)}
@@ -639,8 +731,17 @@ def _render(tasks: list[TaskResource], snapshot_dir: Path) -> str:
         *(["from evo.objects.typed import BaseObject, DownloadedObject"] if "ObjectInput" in used else []),
         *([f"from typing_extensions import {', '.join(extensions)}"] if extensions else []),
         "",
-        f"from .outputs import {', '.join(outputs)}",
-        *(["from .tasks.common.source_target import AnyTypedAttribute"] if "AnyTypedAttribute" in declared else []),
+        *sorted(
+            [
+                *([f"from .outputs import {', '.join(outputs)}"] if outputs else []),
+                *(
+                    ["from .tasks.common.source_target import AnyTypedAttribute"]
+                    if "AnyTypedAttribute" in declared
+                    else []
+                ),
+                *dict.fromkeys(override_imports),
+            ]
+        ),
     ]
     preamble = [
         *_header(snapshot_dir),

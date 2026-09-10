@@ -19,6 +19,9 @@ from evo.common import IContext
 from evo.objects.typed import Attribute, BaseObject, PendingAttribute
 
 from evo.compute import ComputeClient, SyncComputeClient
+from evo.compute.tasks import SearchNeighborhood
+from evo.compute.tasks.common import Ellipsoid, EllipsoidRanges
+from evo.compute.tasks.geostatistics.kriging import KrigingMethod
 
 
 async def declustering(context: IContext) -> None:
@@ -91,21 +94,44 @@ async def typed_handles(context: IContext, pointset: BaseObject, weights: Pendin
     )
 
 
-async def typed_attribute_source(context: IContext, grade: Attribute, target: BaseObject) -> None:
+async def typed_attribute_source(context: IContext, grade: Attribute, kriged: PendingAttribute) -> None:
+    """``kriging_gcp`` has an override, so the surface here is the runner's own, not the schema's.
+
+    That is the point of one: the arguments are the SDK's (``search``, ``method``) and they
+    take the typed models and handles rather than the wire shapes.
+    """
     client = ComputeClient(context)
     await client.geostatistics.kriging_gcp.run(
         source=grade,
-        target={"object": target, "attribute": "kriged_grade"},
-        kriging_method={"type": "ordinary"},
+        target=kriged,
         variogram="https://example.com/objects/variogram",
-        neighborhood={
-            "ellipsoid": {
-                "ellipsoid_ranges": {"major": 100.0, "semi_major": 100.0, "minor": 50.0},
-                "rotation": {"dip_azimuth": 0.0, "dip": 0.0, "pitch": 0.0},
-            },
-            "max_samples": 20,
-        },
+        search=SearchNeighborhood(
+            ellipsoid=Ellipsoid(ranges=EllipsoidRanges(major=100.0, semi_major=100.0, minor=50.0)),
+            max_samples=20,
+        ),
+        method=KrigingMethod.ORDINARY,
     )
+
+
+def overridden_task_without_await(context: IContext, grade: Attribute, kriged: PendingAttribute) -> None:
+    """An override reached through the blocking client keeps its own arguments and result.
+
+    Only the call is unwrapped: ``run`` hands back the runner's ``KrigingResult`` directly
+    rather than a coroutine. That result is the hand-written one, so its own members are
+    still awaited -- ``run_sync`` is there for those.
+    """
+    client = SyncComputeClient(context)
+    result = client.geostatistics.kriging_gcp.run(
+        source=grade,
+        target=kriged,
+        variogram="https://example.com/objects/variogram",
+        search=SearchNeighborhood(
+            ellipsoid=Ellipsoid(ranges=EllipsoidRanges(major=100.0, semi_major=100.0, minor=50.0)),
+            max_samples=20,
+        ),
+        method=KrigingMethod.ORDINARY,
+    )
+    print(result.target_name, result.attribute_name)
 
 
 def declustering_without_await(context: IContext) -> None:

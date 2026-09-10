@@ -28,6 +28,18 @@ from evo.objects.typed import BaseObject, DownloadedObject
 from typing_extensions import NotRequired, TypedDict
 
 from .outputs import ResultNode, SyncResultNode, SyncTaskResult, TaskResult
+from .overrides.geostatistics.kriging_gcp import (
+    BlockDiscretisation,
+    Filter,
+    KrigingResult,
+    OrdinaryKriging,
+    SearchNeighborhood,
+    SimpleKriging,
+    _ObjectInput,
+    _SourceInput,
+    _TargetInput,
+)
+from .overrides.geostatistics.kriging_gcp import KrigingGcpRunner as _GeostatisticsKrigingGcp
 from .tasks.common.source_target import AnyTypedAttribute
 
 __all__ = ["ComputeClient", "SyncComputeClient"]
@@ -162,242 +174,16 @@ class DeclusteringResult(TaskResult):
     target: DeclusteringResultTarget
     """The target that was created or updated with declustering weights."""
 
-class KrigingGcpSourceFilterCondition(TypedDict):
-    """
-    A leaf filter condition applied to one attribute of the filtered object.
-
-    Exactly one operator field must be provided.
-
-    - ``in``: Membership test. Provide string category names for
-        ``CategoryAttribute`` objects or integers for integer-coded indices.
-    - ``not_in``: Exclusion test.
-    - ``equal``, ``not_equal``: Numeric equality/inequality.
-    - ``greater_than``, ``greater_than_or_equal_to``, ``less_than``,
-        ``less_than_or_equal_to``: Numeric comparisons on numeric attributes.
-    """
-
-    operator: Literal[
-        "in",
-        "not_in",
-        "equal",
-        "not_equal",
-        "greater_than",
-        "greater_than_or_equal_to",
-        "less_than",
-        "less_than_or_equal_to",
-    ]
-    """The filter operator. Use 'in' or 'not_in' for category/membership tests (pair with 'values'). Use 'equal', 'not_equal', 'greater_than', 'greater_than_or_equal_to', 'less_than', or 'less_than_or_equal_to' for numeric comparisons (pair with 'threshold')."""
-    values: NotRequired[list[str] | None]
-    """Category values to match. Required when operator is 'in' or 'not_in'. Use strings for string/category-name attributes; use integers for integer-coded attributes."""
-    threshold: NotRequired[float | None]
-    """Numeric threshold for comparison. Required when operator is 'equal', 'not_equal', 'greater_than', 'greater_than_or_equal_to', 'less_than', or 'less_than_or_equal_to'."""
-    type: NotRequired[Literal["condition"]]
-    """Identifies this as a leaf filter condition."""
-    attribute: AttributeInput
-    """Attribute used to filter locations."""
-
-class KrigingGcpSourceAnyOfFilter(TypedDict):
-    """A composite filter that passes locations satisfying ANY child filter (OR logic)."""
-
-    type: NotRequired[Literal["any_of"]]
-    """Identifies this as an OR composite filter."""
-    filters: list[KrigingGcpSourceFilterCondition | KrigingGcpSourceAllOfFilter | KrigingGcpSourceAnyOfFilter]
-    """At least one of these filters must be satisfied (OR logic)."""
-
-class KrigingGcpSourceAllOfFilter(TypedDict):
-    """A composite filter that passes locations satisfying ALL child filters (AND logic)."""
-
-    type: NotRequired[Literal["all_of"]]
-    """Identifies this as an AND composite filter."""
-    filters: list[KrigingGcpSourceFilterCondition | KrigingGcpSourceAllOfFilter | KrigingGcpSourceAnyOfFilter]
-    """All of these filters must be satisfied (AND logic)."""
-
-class KrigingGcpSourceFilter(TypedDict):
-    """Optional filter to apply to the source object. This allows kriging to use only a subset of the known data, defined by filtering an attribute on the source object."""
-
-    where: KrigingGcpSourceFilterCondition | KrigingGcpSourceAllOfFilter | KrigingGcpSourceAnyOfFilter
-    """A filter expression defining which locations to include. Use a FilterCondition for a single predicate, AllOfFilter for AND logic, AnyOfFilter for OR logic, or nest them to build compound predicates."""
-
-class KrigingGcpSource(TypedDict):
-    """The source object and attribute containing known values."""
-
-    object: ObjectInput
-    """Spatial locations of known values."""
-    attribute: AttributeInput
-    """The known values, used to estimate values at unknown locations."""
-    filter: NotRequired[KrigingGcpSourceFilter | None]
-    """Optional filter to apply to the source object. This allows kriging to use only a subset of the known data, defined by filtering an attribute on the source object."""
-
-class KrigingGcpTargetAttributeCreate(TypedDict):
-    operation: Literal["create"]
-    """The operation to perform on the attribute."""
-    name: str
-    """The name of the attribute to create."""
-
-class KrigingGcpTargetAttributeUpdate(TypedDict):
-    operation: Literal["update"]
-    """The operation to perform on the attribute."""
-    reference: AttributeInput
-    """Reference to an existing attribute to update."""
-
-class KrigingGcpAnyOfFilter(TypedDict):
-    """A composite filter that passes locations satisfying ANY child filter (OR logic)."""
-
-    type: NotRequired[Literal["any_of"]]
-    """Identifies this as an OR composite filter."""
-    filters: list[KrigingGcpSourceFilterCondition | KrigingGcpAllOfFilter | KrigingGcpAnyOfFilter]
-    """At least one of these filters must be satisfied (OR logic)."""
-
-class KrigingGcpAllOfFilter(TypedDict):
-    """A composite filter that passes locations satisfying ALL child filters (AND logic)."""
-
-    type: NotRequired[Literal["all_of"]]
-    """Identifies this as an AND composite filter."""
-    filters: list[KrigingGcpSourceFilterCondition | KrigingGcpAllOfFilter | KrigingGcpAnyOfFilter]
-    """All of these filters must be satisfied (AND logic)."""
-
-class KrigingGcpFilter(TypedDict):
-    """Optional filter to apply to the target object. This allows the kriging to only be applied to a subset of the target object, defined by filtering an attribute on the target object."""
-
-    where: KrigingGcpSourceFilterCondition | KrigingGcpAllOfFilter | KrigingGcpAnyOfFilter
-    """A filter expression defining which locations to include. Use a FilterCondition for a single predicate, AllOfFilter for AND logic, AnyOfFilter for OR logic, or nest them to build compound predicates."""
-
-class KrigingGcpTarget(TypedDict):
-    """The target object and attribute to create or update with kriging results."""
-
-    object: ObjectInput
-    """Object to evaluate onto."""
-    attribute: KrigingGcpTargetAttributeCreate | KrigingGcpTargetAttributeUpdate | AttributeInput
-    """Name of the attribute to create or update on the target object"""
-    filter: NotRequired[KrigingGcpFilter | None]
-    """Optional filter to apply to the target object. This allows the kriging to only be applied to a subset of the target object, defined by filtering an attribute on the target object."""
-
-class KrigingGcpSimpleKriging(TypedDict):
-    """Kriging method with a constant mean value."""
-
-    type: Literal["simple"]
-    """The type of kriging to use."""
-    mean: float
-    """The mean value, assumed to be constant across the domain."""
-
-class KrigingGcpOrdinaryKriging(TypedDict):
-    """Kriging method with a variable mean value."""
-
-    type: Literal["ordinary"]
-    """The type of kriging to use."""
-
-class KrigingGcpNeighborhoodEllipsoidEllipsoidRanges(TypedDict):
-    """The ranges of the ellipsoid"""
-
-    major: float
-    """The major axis length of the ellipsoid"""
-    semi_major: float
-    """The semi major axis length of the ellipsoid"""
-    minor: float
-    """The minor axis length of the ellipsoid"""
-
-class KrigingGcpRotation(TypedDict):
-    """The rotation of the ellipsoid"""
-
-    dip_azimuth: NotRequired[float]
-    """first rotation, about the z-axis, in degrees"""
-    dip: NotRequired[float]
-    """second rotation, about the x-axis, in degrees"""
-    pitch: NotRequired[float]
-    """third rotation, about the z-axis, in degrees"""
-
-class KrigingGcpEllipsoid(TypedDict):
-    """
-    The ellipsoid, to search for points within
-    Alias: anisotropy
-    """
-
-    ellipsoid_ranges: KrigingGcpNeighborhoodEllipsoidEllipsoidRanges
-    """The ranges of the ellipsoid"""
-    rotation: KrigingGcpRotation
-    """The rotation of the ellipsoid"""
-
-class KrigingGcpFractionalDistance(TypedDict):
-    """Outlier distance specified as a fraction of the search radius."""
-
-    type: Literal["fraction"]
-    """Specify the distance as a fraction of the search radius."""
-    distance: float
-    """The distance to the outlier limit, as a fraction of the search radius (0.0 to 1.0). For example, a value of 0.5 means the outlier boundary is at 50% of the search radius."""
-
-class KrigingGcpAbsoluteDistance(TypedDict):
-    """Outlier distance specified as an absolute value."""
-
-    type: Literal["absolute"]
-    """Specify the distance as an absolute value."""
-    distance: float
-    """The absolute distance to the outlier limit. This cannot be used yet."""
-
-class KrigingGcpOutlierRestriction(TypedDict):
-    """Outlier restrictions."""
-
-    action: Literal["clamp", "discard"]
-    """The action to take on outliers. Clamp the value, or discard the point."""
-    distance: KrigingGcpFractionalDistance | KrigingGcpAbsoluteDistance
-    """The distance to the outlier limit."""
-    max_value_threshold: NotRequired[float]
-    """The maximum allowed value for the outlier limit. Values exceeding this threshold are either discarded or clamped."""
-    clamp_delta: NotRequired[float]
-    """The maximum randomly-applied delta value for clamped outlier values.Random delta values in the range [0.0...clamp_limit) are added to clamped values toavoid identical values occurring throughout the samples."""
-
-class KrigingGcpNeighborhoodWithOutlierRestrictions(TypedDict):
-    """In Kriging, the value of each evaluation point is determined by a set of nearby points with known values. The search parameters determines which nearby points to use."""
-
-    ellipsoid: KrigingGcpEllipsoid
-    """
-    The ellipsoid, to search for points within
-    Alias: anisotropy
-    """
-    max_samples: int
-    """
-    The maximum number of samples to use for each evaluation point.
-    Alias: max-samples
-    """
-    min_samples: NotRequired[int]
-    """
-    The minimum number of samples to use for each evaluation point.
-    Alias: min-samples
-    """
-    max_empty_octants: NotRequired[int]
-    """The maximum number of empty octants (aka sectors) allowed when searching for neighbors. Omitting this, or a value of 8, disables the octant check."""
-    max_samples_per_octant: NotRequired[int | None]
-    """The maximum number of samples to use from each octant."""
-    max_samples_per_drillhole: NotRequired[int | None]
-    """The maximum number of samples to use from each drillhole (defined by drillhole ID)"""
-    max_empty_quadrants: NotRequired[int | None]
-    """The maximum number of empty quadrants (2D sectors, ignoring Z) allowed when searching for neighbors. If not specified, quadrant filtering is disabled."""
-    max_samples_per_quadrant: NotRequired[int | None]
-    """The maximum number of samples to use from each quadrant (2D sectors, ignoring Z)."""
-    max_drillholes_per_estimate: NotRequired[int | None]
-    """The maximum number of drillholes to be used in each estimate."""
-    outliers: NotRequired[KrigingGcpOutlierRestriction | None]
-    """Outlier restrictions."""
-
-class KrigingGcpBlockDiscretization(TypedDict):
-    """Sub-block discretization for block kriging. When provided, each target block is subdivided into nx * ny * nz sub-cells and the kriged value is averaged across these sub-cells. When omitted, point kriging is performed. Only applicable when the target is a 3D grid or block model."""
-
-    nx: NotRequired[int]
-    """Number of subdivisions in the x direction"""
-    ny: NotRequired[int]
-    """Number of subdivisions in the y direction"""
-    nz: NotRequired[int]
-    """Number of subdivisions in the z direction"""
-
-class KrigingGcpResultAttribute(ResultNode):
-    """Attribute containing the kriging result."""
+class SyncDeclusteringResultAttribute(SyncResultNode):
+    """Attribute containing the declustering weights."""
 
     reference: str
     """Reference to the attribute in the geoscience object."""
     name: str
     """The name of the output attribute."""
 
-class KrigingGcpResultTarget(ResultNode):
-    """The target that was created or updated."""
+class SyncDeclusteringResultTarget(SyncResultNode):
+    """The target that was created or updated with declustering weights."""
 
     reference: str
     """Reference to a geoscience object."""
@@ -407,16 +193,16 @@ class KrigingGcpResultTarget(ResultNode):
     """The description of the geoscience object."""
     schema_id: str
     """The ID of the Geoscience Object schema."""
-    attribute: KrigingGcpResultAttribute
-    """Attribute containing the kriging result."""
+    attribute: SyncDeclusteringResultAttribute
+    """Attribute containing the declustering weights."""
 
-class KrigingGcpResult(TaskResult):
-    """Result of the kriging task."""
+class SyncDeclusteringResult(SyncTaskResult):
+    """Result of the declustering task."""
 
     message: str
     """A message that says what happened in the task."""
-    target: KrigingGcpResultTarget
-    """The target that was created or updated."""
+    target: SyncDeclusteringResultTarget
+    """The target that was created or updated with declustering weights."""
 
 class NormalScoreGcpSource(TypedDict):
     """The source object and attribute containing the values to transform."""
@@ -476,66 +262,6 @@ class NormalScoreGcpResult(TaskResult):
     target: NormalScoreGcpResultTarget
     """The target object that was created or updated."""
 
-class SyncDeclusteringResultAttribute(SyncResultNode):
-    """Attribute containing the declustering weights."""
-
-    reference: str
-    """Reference to the attribute in the geoscience object."""
-    name: str
-    """The name of the output attribute."""
-
-class SyncDeclusteringResultTarget(SyncResultNode):
-    """The target that was created or updated with declustering weights."""
-
-    reference: str
-    """Reference to a geoscience object."""
-    name: str
-    """The name of the geoscience object."""
-    description: str | None
-    """The description of the geoscience object."""
-    schema_id: str
-    """The ID of the Geoscience Object schema."""
-    attribute: SyncDeclusteringResultAttribute
-    """Attribute containing the declustering weights."""
-
-class SyncDeclusteringResult(SyncTaskResult):
-    """Result of the declustering task."""
-
-    message: str
-    """A message that says what happened in the task."""
-    target: SyncDeclusteringResultTarget
-    """The target that was created or updated with declustering weights."""
-
-class SyncKrigingGcpResultAttribute(SyncResultNode):
-    """Attribute containing the kriging result."""
-
-    reference: str
-    """Reference to the attribute in the geoscience object."""
-    name: str
-    """The name of the output attribute."""
-
-class SyncKrigingGcpResultTarget(SyncResultNode):
-    """The target that was created or updated."""
-
-    reference: str
-    """Reference to a geoscience object."""
-    name: str
-    """The name of the geoscience object."""
-    description: str | None
-    """The description of the geoscience object."""
-    schema_id: str
-    """The ID of the Geoscience Object schema."""
-    attribute: SyncKrigingGcpResultAttribute
-    """Attribute containing the kriging result."""
-
-class SyncKrigingGcpResult(SyncTaskResult):
-    """Result of the kriging task."""
-
-    message: str
-    """A message that says what happened in the task."""
-    target: SyncKrigingGcpResultTarget
-    """The target that was created or updated."""
-
 class SyncNormalScoreGcpResultAttribute(SyncResultNode):
     """Attribute containing the transformed values."""
 
@@ -582,21 +308,20 @@ class _GeostatisticsDeclustering:
         """Computes grid-based declustering weights by measuring each sample's influence on evaluation locations. Supports both KNN (arithmetic mean) and IDW (inverse-distance weighted) modes via an optional power parameter."""
         ...
 
-class _GeostatisticsKrigingGcp:
-    """For more information, please read the <a href='/docs/guides/geostatistics-tasks/tasks/kriging'>guide</a>"""
+class _SyncGeostatisticsDeclustering:
+    """Computes grid-based declustering weights by measuring each sample's influence on evaluation locations. Supports both KNN (arithmetic mean) and IDW (inverse-distance weighted) modes via an optional power parameter."""
 
-    async def run(
+    def run(
         self,
         *,
-        source: KrigingGcpSource | AnyTypedAttribute,
-        target: KrigingGcpTarget | AnyTypedAttribute,
-        kriging_method: KrigingGcpSimpleKriging | KrigingGcpOrdinaryKriging,
-        variogram: ObjectInput,
-        neighborhood: KrigingGcpNeighborhoodWithOutlierRestrictions,
-        block_discretisation: KrigingGcpBlockDiscretization | None = ...,
+        source: DeclusteringSource | ObjectInput,
+        grid: DeclusteringGrid | ObjectInput,
+        target: DeclusteringTarget | AnyTypedAttribute,
+        neighborhood: DeclusteringExtendedNeighborhood,
+        power: float | None = ...,
         preview: bool = True,
-    ) -> KrigingGcpResult:
-        """For more information, please read the <a href='/docs/guides/geostatistics-tasks/tasks/kriging'>guide</a>"""
+    ) -> SyncDeclusteringResult:
+        """Computes grid-based declustering weights by measuring each sample's influence on evaluation locations. Supports both KNN (arithmetic mean) and IDW (inverse-distance weighted) modes via an optional power parameter."""
         ...
 
 class _GeostatisticsNormalScoreGcp:
@@ -614,39 +339,6 @@ class _GeostatisticsNormalScoreGcp:
         """For more information, please read the <a href='/docs/guides/geostatistics-tasks/tasks/normal-score'>guide</a>"""
         ...
 
-class _SyncGeostatisticsDeclustering:
-    """Computes grid-based declustering weights by measuring each sample's influence on evaluation locations. Supports both KNN (arithmetic mean) and IDW (inverse-distance weighted) modes via an optional power parameter."""
-
-    def run(
-        self,
-        *,
-        source: DeclusteringSource | ObjectInput,
-        grid: DeclusteringGrid | ObjectInput,
-        target: DeclusteringTarget | AnyTypedAttribute,
-        neighborhood: DeclusteringExtendedNeighborhood,
-        power: float | None = ...,
-        preview: bool = True,
-    ) -> SyncDeclusteringResult:
-        """Computes grid-based declustering weights by measuring each sample's influence on evaluation locations. Supports both KNN (arithmetic mean) and IDW (inverse-distance weighted) modes via an optional power parameter."""
-        ...
-
-class _SyncGeostatisticsKrigingGcp:
-    """For more information, please read the <a href='/docs/guides/geostatistics-tasks/tasks/kriging'>guide</a>"""
-
-    def run(
-        self,
-        *,
-        source: KrigingGcpSource | AnyTypedAttribute,
-        target: KrigingGcpTarget | AnyTypedAttribute,
-        kriging_method: KrigingGcpSimpleKriging | KrigingGcpOrdinaryKriging,
-        variogram: ObjectInput,
-        neighborhood: KrigingGcpNeighborhoodWithOutlierRestrictions,
-        block_discretisation: KrigingGcpBlockDiscretization | None = ...,
-        preview: bool = True,
-    ) -> SyncKrigingGcpResult:
-        """For more information, please read the <a href='/docs/guides/geostatistics-tasks/tasks/kriging'>guide</a>"""
-        ...
-
 class _SyncGeostatisticsNormalScoreGcp:
     """For more information, please read the <a href='/docs/guides/geostatistics-tasks/tasks/normal-score'>guide</a>"""
 
@@ -661,6 +353,23 @@ class _SyncGeostatisticsNormalScoreGcp:
     ) -> SyncNormalScoreGcpResult:
         """For more information, please read the <a href='/docs/guides/geostatistics-tasks/tasks/normal-score'>guide</a>"""
         ...
+
+class _SyncGeostatisticsKrigingGcp:
+    """The override's stand-in for the generic task proxy: same ``run(...)``, typed by hand."""
+
+    def run(
+        self,
+        *,
+        source: _SourceInput,
+        target: _TargetInput,
+        variogram: _ObjectInput,
+        search: SearchNeighborhood,
+        method: SimpleKriging | OrdinaryKriging | None = ...,
+        source_filter: Filter | None = ...,
+        target_filter: Filter | None = ...,
+        block_discretisation: BlockDiscretisation | None = ...,
+        preview: bool | None = ...,
+    ) -> KrigingResult: ...
 
 class _GeostatisticsTasks:
     """Tasks published under the ``geostatistics`` topic."""

@@ -132,6 +132,15 @@ blocking result as the awaited one would have left `result.target.load()` typed 
 coroutine, which is the one thing the two entry points do not agree on —
 `usage_bad.py::awaited_blocking_result` pins that.
 
+**An overridden task is not generated at all.** A task with a hand-written runner (see
+`evo/compute/overrides/`) does not meet its caller through the schema, so generating a
+schema-shaped `run` beside it would advertise arguments the override does not take. The stub
+imports the runner instead — `from .overrides.geostatistics.kriging import KrigingRunner as
+_GeostatisticsKriging` — and the checker reads the annotations that are already on it.
+Nothing is restated, so nothing can drift. The blocking mirror is the one exception: a
+`_Sync...` class is emitted for it, copying the runner's own `run` signature with the
+`async` removed, because that is exactly what `SyncComputeClient` does to it at run time.
+
 ## The runtime half
 
 The stub is one half of a contract the engine enforces at run time from the same schema:
