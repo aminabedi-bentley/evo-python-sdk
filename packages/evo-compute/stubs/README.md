@@ -121,6 +121,13 @@ structurally identical objects collapse onto one type — the published schemas 
 same filter shape at four different depths. Only shapes with the same base collapse, so an
 input `TypedDict` is never reused for a result that has to hydrate.
 
+**An overridden task is not generated at all.** A task with a hand-written runner (see
+`evo/compute/overrides/`) does not meet its caller through the schema, so generating a
+schema-shaped `run` beside it would advertise arguments the override does not take. The stub
+imports the runner instead — `from .overrides.geostatistics.kriging_gcp import
+KrigingGcpRunner as _GeostatisticsKrigingGcp` — and the checker reads the annotations that
+are already on it. Nothing is restated, so nothing can drift.
+
 ## The runtime half
 
 The stub is one half of a contract the engine enforces at run time from the same schema:

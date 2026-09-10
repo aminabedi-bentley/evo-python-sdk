@@ -29,6 +29,9 @@ What comes back is hydrated against the task's ``results`` schema by
 Discovery is performed the first time a task within a topic is ``run(...)``. The
 catalogue is then held by the underlying :class:`~evo.compute.discovery.DiscoveryClient`,
 so repeated runs are served from there until its cache expires.
+
+A task can opt out of the synthesised surface entirely -- see :mod:`evo.compute.overrides`.
+``arun`` always takes the generic path, whether or not the task has an override.
 """
 
 from __future__ import annotations
@@ -44,6 +47,7 @@ from .discovery import DEFAULT_CACHE_TTL_SECONDS, DiscoveryClient
 from .endpoints.models import TaskResource
 from .exceptions import ParameterValidationError
 from .outputs import TaskResult
+from .overrides import load_override
 from .resolution import ReferenceResolver
 from .validation import validate_parameters
 
@@ -168,6 +172,11 @@ class ComputeClient:
     def __repr__(self) -> str:
         return f"ComputeClient(org_id={str(self._org_id)!r})"
 
+    @property
+    def context(self) -> IContext:
+        """The context this client runs against, for overrides that build their own results."""
+        return self._context
+
     # -- non-blocking reads of the discovery cache -------------------------- #
 
     def _peek_spec(self, topic: str, task: str) -> TaskResource | None:
@@ -264,9 +273,12 @@ class _TopicProxy:
         self._client = client
         self._topic = topic
 
-    def __getattr__(self, name: str) -> _TaskProxy:
+    def __getattr__(self, name: str) -> Any:
         if name.startswith("_"):
             raise AttributeError(name)
+        # A task with an override is handed to it whole; the rest stay generic.
+        if (override := load_override(self._topic, _normalise(name))) is not None:
+            return override.bind(self._client, self._topic, name)
         return _TaskProxy(self._client, self._topic, name)
 
     def __dir__(self) -> list[str]:
