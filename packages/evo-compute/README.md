@@ -54,6 +54,11 @@ result = await Kriging.arun(manager, parameters, preview=True)
 the task's named arguments directly. Do not combine a parameter model or dictionary with named
 task arguments; execution options such as `preview` remain separate.
 
+Calls prefer the same bespoke runner as the client namespace. For those tasks, dictionaries
+use the runner's argument names and input forms, such as `search: SearchNeighborhood` and
+`method` for `Kriging`. Parameter models retain their native fields through dispatch, so their
+wire aliases, filters, and diagnostics are serialized by the bespoke runner rather than lost.
+
 The imported value is an immutable task identity, not a client or a manager singleton. Equal
 task identities need not be the same Python object. Imports do not mutate package namespaces
 or retain a global handle or catalogue cache, and do not authenticate or fetch discovery.
@@ -87,6 +92,8 @@ change that registration contract. Neither is required for async context or inpu
 
 Results retain the existing client's contract. Generic blocking results have blocking loaders;
 bespoke task results retain their own types and loader behavior, including asynchronous loaders.
+The synchronous notebook wraps a bespoke target reference in a public `SyncResultNode` to load
+its object and dataframe without `await`, keeping the handwritten result API unchanged.
 Existing lowercase task-module imports and the legacy `await tasks.run(manager, parameters)`
 API are unchanged. Unique task names are also importable from `evo.compute.tasks`.
 

@@ -1121,13 +1121,14 @@ dev = [
     { name = "parameterized", specifier = "==0.9.0" },
     { name = "pytest" },
     { name = "ruff" },
+    { name = "ruff", specifier = "==0.15.16" },
 ]
 test = [
     { name = "evo-sdk-common", extras = ["aiohttp"], editable = "packages/evo-sdk-common" },
     { name = "mypy" },
     { name = "parameterized", specifier = "==0.9.0" },
     { name = "pytest" },
-    { name = "ruff" },
+    { name = "ruff", specifier = "==0.15.16" },
 ]
 
 [[package]]
