@@ -33,6 +33,9 @@ a notebook cell. It wraps a :class:`ComputeClient` and blocks on the bridge in
 Discovery is performed the first time a task within a topic is ``run(...)``. The
 catalogue is then held by the underlying :class:`~evo.compute.discovery.DiscoveryClient`,
 so repeated runs are served from there until its cache expires.
+
+A task can opt out of the synthesised surface entirely -- see :mod:`evo.compute.overrides`.
+``arun`` always takes the generic path, whether or not the task has an override.
 """
 
 from __future__ import annotations
@@ -49,6 +52,7 @@ from .discovery import DEFAULT_CACHE_TTL_SECONDS, DiscoveryClient
 from .endpoints.models import TaskResource
 from .exceptions import ParameterValidationError
 from .outputs import SyncTaskResult, TaskResult
+from .overrides import load_override
 from .resolution import ReferenceResolver
 from .validation import validate_parameters
 
@@ -181,6 +185,11 @@ class ComputeClient:
     def __repr__(self) -> str:
         return f"ComputeClient(org_id={str(self._org_id)!r})"
 
+    @property
+    def context(self) -> IContext:
+        """The context this client runs against, for overrides that build their own results."""
+        return self._context
+
     # -- non-blocking reads of the discovery cache -------------------------- #
 
     def _peek_spec(self, topic: str, task: str) -> TaskResource | None:
@@ -290,6 +299,36 @@ class ComputeClient:
         run.__qualname__ = f"{_normalise(task)}.run"
         _describe_from_schema(run, self, topic, task)
         return run
+
+    def _bind_override(self, override: Any, topic: str, task: str) -> Any:
+        """Hand a task to its override. The runner awaits, as every other call here does."""
+        return override.bind(self, topic, task)
+
+
+class _BlockingRunner:
+    """A hand-written runner with its ``run`` blocked, for :class:`SyncComputeClient`.
+
+    An override answers with its own runner, which awaits like everything else in the engine.
+    Only the call itself is wrapped: what it returns is the override's own typed result, whose
+    members stay awaitable on both paths. :func:`~evo.compute.run_sync` is there for those.
+    """
+
+    def __init__(self, runner: Any) -> None:
+        self._runner = runner
+
+    def run(self, **parameters: Any) -> Any:
+        return run_sync(self._runner.run(**parameters))
+
+    def __getattr__(self, name: str) -> Any:
+        if name.startswith("_"):
+            raise AttributeError(name)
+        return getattr(self._runner, name)
+
+    def __dir__(self) -> list[str]:
+        return sorted(set(super().__dir__()) | set(dir(self._runner)))
+
+    def __repr__(self) -> str:
+        return repr(self._runner)
 
 
 class SyncComputeClient:
@@ -409,6 +448,10 @@ class SyncComputeClient:
         _describe_from_schema(run, self, topic, task)
         return run
 
+    def _bind_override(self, override: Any, topic: str, task: str) -> _BlockingRunner:
+        """Hand a task to its override, bound to the engine underneath and blocked on the bridge."""
+        return _BlockingRunner(override.bind(self._async, topic, task))
+
 
 class _TopicProxy:
     """A single topic within the catalogue; resolves attribute access to task proxies."""
@@ -417,9 +460,12 @@ class _TopicProxy:
         self._client = client
         self._topic = topic
 
-    def __getattr__(self, name: str) -> _TaskProxy:
+    def __getattr__(self, name: str) -> Any:
         if name.startswith("_"):
             raise AttributeError(name)
+        # A task with an override is handed to it whole; the rest stay generic.
+        if (override := load_override(self._topic, _normalise(name))) is not None:
+            return self._client._bind_override(override, self._topic, name)
         return _TaskProxy(self._client, self._topic, name)
 
     def __dir__(self) -> list[str]:
