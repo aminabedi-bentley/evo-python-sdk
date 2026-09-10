@@ -17,7 +17,7 @@ a task is run, reads that task's schema from the live discovery catalogue to sha
 and submit the job::
 
     client = ComputeClient(context)
-    result = await client.geostatistics.kriging_gcp.run(source=..., target=..., ...)
+    result = await client.geostatistics.kriging.run(source=..., target=..., search=..., ...)
 
 A call is checked, resolved, checked again and submitted: required parameters first
 (before anything reaches the network), then :mod:`~evo.compute.resolution` turns the
@@ -29,11 +29,15 @@ What comes back is hydrated against the task's ``results`` schema by
 Discovery is performed the first time a task within a topic is ``run(...)``. The
 catalogue is then held by the underlying :class:`~evo.compute.discovery.DiscoveryClient`,
 so repeated runs are served from there until its cache expires.
+
+A task can opt into a hand-written surface through :mod:`evo.compute.overrides`.
+``arun`` remains the explicit generic route, including for overridden tasks.
 """
 
 from __future__ import annotations
 
 import inspect
+import keyword
 from typing import Any, Literal, Optional, Union
 from uuid import UUID
 
@@ -44,6 +48,7 @@ from .discovery import DEFAULT_CACHE_TTL_SECONDS, DiscoveryClient
 from .endpoints.models import TaskResource
 from .exceptions import ParameterValidationError
 from .outputs import TaskResult
+from .overrides import load_override
 from .resolution import ReferenceResolver
 from .validation import validate_parameters
 
@@ -63,7 +68,7 @@ _JSON_SCHEMA_TO_PYTHON: dict[str, type] = {
 
 
 def _normalise(name: str) -> str:
-    """Map a platform task name to a Python identifier (``kriging-gcp`` -> ``kriging_gcp``)."""
+    """Map a platform name to a Python identifier (``normal-score`` -> ``normal_score``)."""
     return name.replace("-", "_")
 
 
@@ -79,6 +84,17 @@ def _python_annotation(prop: dict[str, Any]) -> Any:
     return _JSON_SCHEMA_TO_PYTHON.get(json_type, Any)
 
 
+def _wire_names(spec: TaskResource) -> dict[str, str]:
+    """Map unambiguous Python parameter names back to the catalogue's wire names."""
+    names: dict[str, str] = {}
+    for wire_name in (spec.parameters or {}).get("properties", {}):
+        python_name = _normalise(wire_name)
+        if not python_name.isidentifier() or keyword.iskeyword(python_name) or python_name in names:
+            return {}
+        names[python_name] = wire_name
+    return names
+
+
 def _signature_from_schema(spec: TaskResource) -> inspect.Signature:
     """Synthesise a keyword-only ``run(...)`` signature from a task's parameter schema.
 
@@ -88,29 +104,36 @@ def _signature_from_schema(spec: TaskResource) -> inspect.Signature:
     schema = spec.parameters or {}
     properties: dict[str, Any] = schema.get("properties", {})
     required = list(schema.get("required", []))
+    names = _wire_names(spec)
+    python_names = {wire_name: python_name for python_name, wire_name in names.items()}
 
     parameters: list[inspect.Parameter] = []
-    for name in required:
-        parameters.append(
-            inspect.Parameter(
-                name, inspect.Parameter.KEYWORD_ONLY, annotation=_python_annotation(properties.get(name, {}))
+    if names or not properties:
+        for name in required:
+            parameters.append(
+                inspect.Parameter(
+                    python_names.get(name, name),
+                    inspect.Parameter.KEYWORD_ONLY,
+                    annotation=_python_annotation(properties.get(name, {})),
+                )
             )
-        )
-    for name, prop in properties.items():
-        if name in required:
-            continue
-        parameters.append(
-            inspect.Parameter(
-                name,
-                inspect.Parameter.KEYWORD_ONLY,
-                default=prop.get("default", None),
-                annotation=_python_annotation(prop),
+        for name, prop in properties.items():
+            if name in required:
+                continue
+            parameters.append(
+                inspect.Parameter(
+                    python_names[name],
+                    inspect.Parameter.KEYWORD_ONLY,
+                    default=prop.get("default", None),
+                    annotation=_python_annotation(prop),
+                )
             )
-        )
     # ``preview`` defaults to opting in for tasks gated behind a feature flag.
     parameters.append(
         inspect.Parameter("preview", inspect.Parameter.KEYWORD_ONLY, default=bool(spec.feature_flag), annotation=bool)
     )
+    if properties and not names:
+        parameters.append(inspect.Parameter("parameters", inspect.Parameter.VAR_KEYWORD, annotation=Any))
     return inspect.Signature(parameters, return_annotation=TaskResult)
 
 
@@ -154,6 +177,11 @@ class ComputeClient:
         self._deep_validation = deep_validation
         self._check_schemas = check_schemas
 
+    @property
+    def context(self) -> IContext:
+        """The context used to submit tasks and load their results."""
+        return self._context
+
     # -- dynamic namespace ------------------------------------------------- #
 
     def __getattr__(self, name: str) -> _TopicProxy:
@@ -163,7 +191,9 @@ class ComputeClient:
         return _TopicProxy(self, name)
 
     def __dir__(self) -> list[str]:
-        return sorted(set(super().__dir__()) | {resource.topic for resource in self._discovery.peek_tasks()})
+        return sorted(
+            set(super().__dir__()) | {_normalise(resource.topic) for resource in self._discovery.peek_tasks()}
+        )
 
     def __repr__(self) -> str:
         return f"ComputeClient(org_id={str(self._org_id)!r})"
@@ -174,7 +204,7 @@ class ComputeClient:
         """Return an already-discovered spec, or ``None`` while the catalogue is unfetched or stale."""
         normalised = _normalise(task)
         for resource in self._discovery.peek_tasks():
-            if resource.topic == topic and _normalise(resource.name) == normalised:
+            if _normalise(resource.topic) == _normalise(topic) and _normalise(resource.name) == normalised:
                 return resource
         return None
 
@@ -212,6 +242,11 @@ class ComputeClient:
         # platform's own defaults while an explicit ``None`` still reaches the wire.
         wire_parameters = dict(bound.arguments)
         preview = bool(wire_parameters.pop("preview", signature.parameters["preview"].default))
+        names = _wire_names(spec)
+        if names:
+            wire_parameters = {names.get(name, name): value for name, value in wire_parameters.items()}
+        else:
+            wire_parameters.update(wire_parameters.pop("parameters", {}))
 
         if validate is None:
             validate = self._validate
@@ -249,6 +284,12 @@ class ComputeClient:
         """
         normalised = _normalise(task)
         topic_tasks = await self._discovery.get_topic_tasks(topic)
+        if not topic_tasks:
+            topic_tasks = [
+                resource
+                for resource in await self._discovery.list_tasks()
+                if _normalise(resource.topic) == _normalise(topic)
+            ]
         for resource in topic_tasks:
             if _normalise(resource.name) == normalised:
                 return resource
@@ -264,9 +305,11 @@ class _TopicProxy:
         self._client = client
         self._topic = topic
 
-    def __getattr__(self, name: str) -> _TaskProxy:
+    def __getattr__(self, name: str) -> Any:
         if name.startswith("_"):
             raise AttributeError(name)
+        if (override := load_override(self._topic, _normalise(name))) is not None:
+            return override.bind(self._client, self._topic, name)
         return _TaskProxy(self._client, self._topic, name)
 
     def __dir__(self) -> list[str]:
@@ -275,7 +318,7 @@ class _TopicProxy:
             | {
                 _normalise(resource.name)
                 for resource in self._client._discovery.peek_tasks()
-                if resource.topic == self._topic
+                if _normalise(resource.topic) == _normalise(self._topic)
             }
         )
 

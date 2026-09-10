@@ -322,7 +322,9 @@ class PayloadParityTestCase(IsolatedAsyncioTestCase):
         )
         with catalogue, _capture_submit("evo.compute.engine") as submit:
             with self.assertRaises(_SubmitCaptured):
-                await getattr(self.client.geostatistics, runner_cls.task.replace("-", "_")).run(**parameters)
+                # `arun`, not attribute access: what is under comparison is the generic path,
+                # and an override deliberately shadows the namespace for its own task.
+                await self.client.arun("geostatistics", runner_cls.task, parameters)
         return submit.await_args.kwargs["parameters"]
 
     async def payload_difference(self, runner_cls, **inputs: Any) -> list[str]:
