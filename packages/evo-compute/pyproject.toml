@@ -31,6 +31,9 @@ notebooks = ["evo-sdk-common[notebooks]"]
 # Dev dependencies. The version is left unspecified so the latest is installed.
 test = [
     "evo-sdk-common[aiohttp]",
+    # tests/test_stubgen.py runs a real checker over the generated stub; without one
+    # installed those tests skip and the stub's static guarantees go unverified.
+    "mypy",
     "parameterized==0.9.0",
     "pytest",
 ]
