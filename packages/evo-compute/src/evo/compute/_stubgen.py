@@ -29,12 +29,17 @@ The runtime stays fully generic: a task published after the snapshot still runs,
 just not statically known until the snapshot is refreshed. That is the deliberate trade —
 total runtime breadth, point-in-time static breadth. :meth:`ComputeClient.arun` is the
 typed escape hatch for anything the stub does not know about.
+
+A task with an override (see :mod:`evo.compute.overrides`) is the one case where the schema
+is *not* what the caller meets, so nothing is generated for it: the stub imports the runner
+and lets the checker read the annotations that are already on it.
 """
 
 from __future__ import annotations
 
 import argparse
 import ast
+import inspect
 import json
 import keyword
 import re
@@ -44,6 +49,7 @@ from pathlib import Path
 from typing import Any
 
 from .endpoints.models import TaskResource
+from .overrides import load_override
 
 __all__ = [
     "capture_snapshot",
@@ -495,8 +501,7 @@ def _header(snapshot_dir: Path) -> list[str]:
     ]
 
 
-def _render_client(stubs: list[_TaskStub]) -> list[str]:
-    topics = sorted({stub.topic for stub in stubs})
+def _render_client(topics: list[str]) -> list[str]:
     lines = [
         "class ComputeClient:",
         _docstring(
@@ -538,8 +543,34 @@ def _render_client(stubs: list[_TaskStub]) -> list[str]:
     return lines
 
 
+def _override_runner(task: TaskResource) -> tuple[str, str] | None:
+    """The module and class of the runner that owns ``task``, or ``None`` if it is generic.
+
+    The runner class is whatever the module's ``bind`` is annotated to return. Under
+    ``from __future__ import annotations`` that annotation arrives as a string, which is the
+    name wanted here either way.
+    """
+    module = load_override(task.topic, task.name.replace("-", "_"))
+    if module is None:
+        return None
+    annotation = inspect.signature(module.bind).return_annotation
+    return module.__name__.removeprefix("evo.compute"), getattr(annotation, "__name__", annotation)
+
+
 def _render(tasks: list[TaskResource], snapshot_dir: Path) -> str:
-    stubs = [_TaskRenderer(task).render() for task in sorted(tasks, key=lambda task: (task.topic, task.name))]
+    ordered = sorted(tasks, key=lambda task: (task.topic, task.name))
+
+    stubs: list[_TaskStub] = []
+    override_imports: list[str] = []
+    members: dict[str, list[tuple[str, str]]] = {}
+    for task in ordered:
+        class_name = f"_{_camel(task.topic)}{_camel(task.name)}"
+        if (runner := _override_runner(task)) is None:
+            stubs.append(_TaskRenderer(task).render())
+        else:
+            module, name = runner
+            override_imports.append(f"from {module} import {name} as {class_name}")
+        members.setdefault(task.topic, []).append((task.name.replace("-", "_"), class_name))
 
     blocks: list[str] = []
     for stub in stubs:
@@ -565,16 +596,16 @@ def _render(tasks: list[TaskResource], snapshot_dir: Path) -> str:
             lines.append(f"    ) -> {stub.return_type}: ...")
         blocks.append("\n".join(lines))
 
-    for topic in sorted({stub.topic for stub in stubs}):
+    for topic, entries in sorted(members.items()):
         lines = [
             f"class _{_camel(topic)}Tasks:",
             _docstring(f"Tasks published under the ``{topic}`` topic.", "    "),
             "",
         ]
-        lines.extend(f"    {stub.attribute}: {stub.class_name}" for stub in stubs if stub.topic == topic)
+        lines.extend(f"    {attribute}: {class_name}" for attribute, class_name in entries)
         blocks.append("\n".join(lines))
 
-    blocks.append("\n".join(_render_client(stubs)))
+    blocks.append("\n".join(_render_client(sorted(members))))
 
     body = "\n\n".join(blocks)
     used = {name: alias for name, alias in _REFERENCE_ALIASES.items() if re.search(rf"\b{name}\b", body)}
@@ -600,8 +631,17 @@ def _render(tasks: list[TaskResource], snapshot_dir: Path) -> str:
         *(["from evo.objects.typed import BaseObject, DownloadedObject"] if "ObjectInput" in used else []),
         *([f"from typing_extensions import {', '.join(extensions)}"] if extensions else []),
         "",
-        "from .outputs import ResultNode, TaskResult",
-        *(["from .tasks.common.source_target import AnyTypedAttribute"] if "AnyTypedAttribute" in declared else []),
+        *sorted(
+            [
+                "from .outputs import ResultNode, TaskResult",
+                *(
+                    ["from .tasks.common.source_target import AnyTypedAttribute"]
+                    if "AnyTypedAttribute" in declared
+                    else []
+                ),
+                *override_imports,
+            ]
+        ),
     ]
     preamble = [*_header(snapshot_dir), "", *imports, "", '__all__ = ["ComputeClient"]', *(aliases or [""])]
     return "\n".join(preamble) + "\n" + body + "\n"

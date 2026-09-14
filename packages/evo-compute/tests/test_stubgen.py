@@ -107,10 +107,32 @@ class TestGeneratedArtifact(unittest.TestCase):
     def test_stub_signatures_match_the_runtime_signatures(self) -> None:
         """What the stub advertises is what :func:`_signature_from_schema` will bind."""
         for task in _stubgen.load_snapshot(_stubgen.DEFAULT_SNAPSHOT_DIR):
+            if _stubgen._override_runner(task) is not None:
+                continue  # an overridden task is bound by its runner, not by the schema
             with self.subTest(task=f"{task.topic}.{task.name}"):
                 stub = _stubgen._TaskRenderer(task).render()
                 declared = [parameter.split(":")[0] for parameter in stub.run_parameters]
                 self.assertEqual(list(_signature_from_schema(task).parameters), declared)
+
+    def test_an_overridden_task_is_the_runner_itself(self) -> None:
+        """Nothing is generated for it, so there is no second signature to drift from.
+
+        The checker reads the runner's own annotations, which is what the caller meets --
+        generating a schema-shaped ``run`` beside it would advertise arguments the override
+        does not take.
+        """
+        overridden = [
+            task for task in _stubgen.load_snapshot(_stubgen.DEFAULT_SNAPSHOT_DIR) if _stubgen._override_runner(task)
+        ]
+        self.assertTrue(overridden, "no overridden task in the snapshot to check")
+
+        stub = _stubgen.DEFAULT_OUTPUT.read_text()
+        for task in overridden:
+            with self.subTest(task=f"{task.topic}.{task.name}"):
+                module, runner = _stubgen._override_runner(task)
+                alias = f"_{_stubgen._camel(task.topic)}{_stubgen._camel(task.name)}"
+                self.assertIn(f"from {module} import {runner} as {alias}", stub)
+                self.assertNotIn(f"class {alias}:", stub)
 
     def test_the_client_signatures_are_not_hand_maintained_into_drift(self) -> None:
         """The task surface is generated, but ``ComputeClient``'s own methods are written out.
