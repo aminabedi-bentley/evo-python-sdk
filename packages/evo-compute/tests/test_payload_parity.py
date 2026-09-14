@@ -248,14 +248,34 @@ def _renest_folded_filters(schema: dict[str, Any], folded: dict[str, Any]) -> No
             block.setdefault("properties", {})[leaf] = dict(prop, composite="filter")
 
 
+def _writes_its_own_wire_form(model: type[BaseModel]) -> bool:
+    """Whether ``model`` hand-writes what it sends, rather than serialising its own fields.
+
+    A plain ``@model_serializer`` replaces the payload outright, so the model's fields stop
+    describing what reaches the wire -- ``SearchNeighborhood`` validates ``ellipsoid.ranges``
+    and sends ``ellipsoid.ellipsoid_ranges``. A ``mode="wrap"`` serializer defers to the
+    handler and only adds to what it returns, so those models still describe themselves.
+
+    Advertising such a model's fields anyway would fault every payload built from it. Nothing
+    in this module notices, because deep validation is off here; :mod:`test_behavior_parity`
+    turns it on and is where that would surface. The cost is that nothing inside such a model
+    is compared at all, which GSTAT-327 removes by moving ``SearchNeighborhood``'s rename onto
+    the field it renames -- this function goes with it.
+    """
+    decorators = model.__pydantic_decorators__.model_serializers.values()
+    return any(decorator.info.mode == "plain" for decorator in decorators)
+
+
 def task_spec(runner_cls) -> TaskResource:
     """The discovery spec the engine would fetch for ``runner_cls``, built from its own model.
 
-    Three departures from a plain ``model_json_schema`` keep this a fair stand-in for the
-    catalogue. Fields the runner folds into another field are ``exclude=True`` -- inputs to
-    the model that never reach the wire -- so they are advertised where the payload carries
-    them rather than at the top level. And reference leaves carry the annotations the
-    resolver reads, without which it would leave a caller's objects and attributes untouched.
+    Departures from a plain ``model_json_schema`` keep this a fair stand-in for the catalogue,
+    which describes the wire and nothing else. Fields the runner folds into another field are
+    ``exclude=True`` -- inputs to the model that never reach the wire -- so they are advertised
+    where the payload carries them rather than at the top level. Reference leaves carry the
+    annotations the resolver reads, without which it would leave a caller's objects and
+    attributes untouched. And a model that hand-writes its own wire form is advertised as the
+    opaque object it is, because its fields are no longer a description of what it sends.
     """
     model = runner_cls.params_type
     schema = model.model_json_schema(by_alias=True, mode="validation")
@@ -266,8 +286,12 @@ def task_spec(runner_cls) -> TaskResource:
     _renest_folded_filters(schema, {name: properties[name] for name in folded if name in properties})
 
     models = _models_reachable_from(model, {})
-    for name, block in ((model.__name__, schema), *schema.get("$defs", {}).items()):
+    definitions = schema.get("$defs", {})
+    for name, block in ((model.__name__, schema), *definitions.items()):
         if (owner := models.get(name)) is None:
+            continue
+        if name in definitions and _writes_its_own_wire_form(owner):
+            definitions[name] = {"type": "object"}
             continue
         for field_name, field in owner.model_fields.items():
             key = field.alias or field_name
