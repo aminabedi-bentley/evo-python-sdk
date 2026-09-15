@@ -2,12 +2,14 @@
 
 `ComputeClient` builds its `client.<topic>.<task>.run(...)` namespace at runtime from the
 live discovery catalogue. Nothing about that surface exists in `engine.py`, so a type
-checker sees `Any` and an editor offers no completion.
+checker sees `Any` and an editor offers no completion. `SyncComputeClient` mirrors that
+surface without the `await`, and has the same problem.
 
 This directory closes that gap. An **offline** generator turns a checked-in snapshot of the
 task catalogue into [`src/evo/compute/engine.pyi`](../src/evo/compute/engine.pyi), which
 type checkers read instead of `engine.py`. Every snapshotted task then gets completion,
-signature help, hover documentation, parameter type-checking and a typed result.
+signature help, hover documentation, parameter type-checking and a typed result, through
+either client.
 
 ```
 stubs/
@@ -120,6 +122,15 @@ prefix so an input and an output that share a schema title stay distinct. Within
 structurally identical objects collapse onto one type — the published schemas inline the
 same filter shape at four different depths. Only shapes with the same base collapse, so an
 input `TypedDict` is never reused for a result that has to hydrate.
+
+**The blocking client gets its own result tree, but shares the parameters.** What differs
+between `ComputeClient` and `SyncComputeClient` is whether `run(...)` and the loaders below
+the result are coroutines, so the result classes are generated a second time as
+`Sync<Task>Result...` rooted in `SyncTaskResult` / `SyncResultNode`. The parameter types
+are identical and are emitted once; the blocking pass reuses them verbatim. Declaring the
+blocking result as the awaited one would have left `result.target.load()` typed as a
+coroutine, which is the one thing the two entry points do not agree on —
+`usage_bad.py::awaited_blocking_result` pins that.
 
 ## The runtime half
 
