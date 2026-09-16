@@ -27,6 +27,7 @@ from unittest import IsolatedAsyncioTestCase, mock
 
 import jmespath
 from evo.common.test_tools import TestWithConnector
+from evo.jmespath import proxy
 from evo.objects import ObjectSchema
 from evo.objects.typed import BaseObject
 
@@ -66,7 +67,10 @@ def loaded_object(document: dict, schema: ObjectSchema = POINTSET) -> mock.Magic
     obj = mock.MagicMock(spec=BaseObject)
     obj.metadata.schema_id = schema
     obj.to_dataframe = mock.AsyncMock(return_value="dataframe")
-    obj.search = lambda expression: jmespath.search(expression, document)
+    # Proxied, because that is what ``BaseObject.search`` returns: a ``Sequence`` and a
+    # ``Mapping`` rather than a ``list`` and a ``dict``. Searching raw here would let a
+    # lookup that only recognises the concrete types pass.
+    obj.search = lambda expression: proxy(jmespath.search(expression, document))
     obj.attributes = _FakeAttributes(jmespath.search("attributes || locations.attributes", document))
     return obj
 
