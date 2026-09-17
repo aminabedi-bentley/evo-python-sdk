@@ -21,8 +21,6 @@ from evo.common import IContext
 from evo.compute import ComputeClient, SyncComputeClient
 
 EXPECTED_ERRORS = [
-    "geology",  # topic that is not in the catalogue snapshot
-    "made_up_task",  # task that is not in the catalogue snapshot
     "neighborhood",  # required parameter omitted
     "sourse",  # misspelled parameter
     "power",  # wrong scalar type
@@ -30,16 +28,6 @@ EXPECTED_ERRORS = [
     "upper_case",  # result attribute used as something other than the type it declares
     "await",  # blocking client's result awaited as though it were the async one's
 ]
-
-
-async def unknown_topic(context: IContext) -> None:
-    client = ComputeClient(context)
-    await client.geology.declustering.run()
-
-
-async def unknown_task(context: IContext) -> None:
-    client = ComputeClient(context)
-    await client.geostatistics.made_up_task.run()
 
 
 async def missing_required_parameter(context: IContext) -> None:

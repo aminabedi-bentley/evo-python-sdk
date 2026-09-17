@@ -72,6 +72,23 @@ async def not_in_the_snapshot(context: IContext) -> None:
     print(result)
 
 
+async def a_topic_the_snapshot_has_never_seen(context: IContext) -> None:
+    """Execution is live; hints are point-in-time. An unlisted name is untyped, not wrong.
+
+    The catalogue is per-organization and moves between SDK releases, so the snapshot is
+    never all of it. These calls reach the engine exactly as a snapshotted task does; the
+    only thing missing is the parameter and result types.
+    """
+    client = ComputeClient(context)
+    await client.geology.some_task.run(anything=1)
+    await client.geostatistics.a_task_added_last_week.run(source="...")
+
+
+def a_topic_the_snapshot_has_never_seen_without_await(context: IContext) -> None:
+    client = SyncComputeClient(context)
+    client.converter.obj_import.run(file="...")
+
+
 async def typed_handles(context: IContext, pointset: BaseObject, weights: PendingAttribute) -> None:
     """Reference resolution takes the handles the typed tasks take, so the stub does too.
 
@@ -95,13 +112,13 @@ async def typed_handles(context: IContext, pointset: BaseObject, weights: Pendin
 
 
 async def typed_attribute_source(context: IContext, grade: Attribute, kriged: PendingAttribute) -> None:
-    """``kriging_gcp`` has an override, so the surface here is the runner's own, not the schema's.
+    """``kriging`` has an override, so the surface here is the runner's own, not the schema's.
 
     That is the point of one: the arguments are the SDK's (``search``, ``method``) and they
     take the typed models and handles rather than the wire shapes.
     """
     client = ComputeClient(context)
-    await client.geostatistics.kriging_gcp.run(
+    await client.geostatistics.kriging.run(
         source=grade,
         target=kriged,
         variogram="https://example.com/objects/variogram",
@@ -121,7 +138,7 @@ def overridden_task_without_await(context: IContext, grade: Attribute, kriged: P
     still awaited -- ``run_sync`` is there for those.
     """
     client = SyncComputeClient(context)
-    result = client.geostatistics.kriging_gcp.run(
+    result = client.geostatistics.kriging.run(
         source=grade,
         target=kriged,
         variogram="https://example.com/objects/variogram",

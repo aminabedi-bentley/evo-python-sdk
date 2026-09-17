@@ -9,12 +9,12 @@
 #  See the License for the specific language governing permissions and
 #  limitations under the License.
 
-"""Hand-written runner for ``geostatistics/kriging-gcp`` -- the worked example of an override.
+"""Hand-written runner for ``geostatistics/kriging`` -- the worked example of an override.
 
 Kriging is the task with the most behind it: a parameter model that has been through
 review, a result type with helpers a synthesised one could not have, and two mistakes the
 published schema has no way to describe. So it is the one that earns a hand-written
-surface, and ``client.geostatistics.kriging_gcp`` is served from here instead of from the
+surface, and ``client.geostatistics.kriging`` is served from here instead of from the
 generic proxy.
 
 What the override adds, and nothing more:
@@ -37,7 +37,7 @@ What it does not add is a second way to reach the platform. The payload still go
 resolved and submitted exactly as any other task is, and the generic path to this same task
 stays open for anyone who wants it::
 
-    result = await client.arun("geostatistics", "kriging-gcp", {...})
+    result = await client.arun("geostatistics", "kriging", {...})
 """
 
 from __future__ import annotations
@@ -64,7 +64,7 @@ if TYPE_CHECKING:
     from ...engine import ComputeClient
 
 __all__ = [
-    "KrigingGcpRunner",
+    "KrigingOverride",
     "bind",
 ]
 
@@ -95,7 +95,7 @@ def _same_object(left: str, right: str) -> bool:
     )
 
 
-class KrigingGcpRunner:
+class KrigingOverride:
     """The override's stand-in for the generic task proxy: same ``run(...)``, typed by hand."""
 
     def __init__(self, client: ComputeClient, topic: str, task: str) -> None:
@@ -190,6 +190,6 @@ class KrigingGcpRunner:
         return f"<compute task {self._topic!r}.{self._task.replace('-', '_')!r} (override)>"
 
 
-def bind(client: ComputeClient, topic: str, task: str) -> KrigingGcpRunner:
+def bind(client: ComputeClient, topic: str, task: str) -> KrigingOverride:
     """Hand this task to the override. Called by :mod:`evo.compute.overrides`."""
-    return KrigingGcpRunner(client, topic, task)
+    return KrigingOverride(client, topic, task)
