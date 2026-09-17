@@ -43,12 +43,14 @@ import inspect
 import json
 import keyword
 import re
+import subprocess
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 from .endpoints.models import TaskResource
+from .engine import _wire_names
 from .overrides import load_override, overridden_tasks
 
 __all__ = [
@@ -67,6 +69,11 @@ DEFAULT_OUTPUT = _PACKAGE_DIR / "engine.pyi"
 """The generated stub, which shadows ``engine.py`` for type checkers."""
 
 _MANIFEST_NAME = "manifest.json"
+
+# Deployments accumulate throwaway topics -- `test-cbcfabfdabaf` and friends, one task each,
+# published by whoever was exercising the platform that day. Capturing them would ship someone's
+# scratch work as public typed API, so they are skipped and reported rather than silently kept.
+_SCRATCH_TOPIC = re.compile(r"^test(-|$)")
 
 _LINE_LENGTH = 120
 
@@ -158,10 +165,37 @@ def _member_tag(member: Any, index: int) -> str:
     return str(index)
 
 
+def _is_single_literal(annotation: str) -> bool:
+    """Whether ``annotation`` is one ``Literal[...]`` rather than a union containing one."""
+    try:
+        node = ast.parse(annotation, mode="eval").body
+    except SyntaxError:
+        return False
+    return isinstance(node, ast.Subscript) and isinstance(node.value, ast.Name) and node.value.id == "Literal"
+
+
+def _join_union(annotations: list[str]) -> str:
+    """``A | B``, with any ``Literal`` members folded into a single ``Literal[...]``.
+
+    A schema that spells its allowed values as sibling ``const`` branches would otherwise
+    render as ``Literal[200] | Literal[201] | ...``, which says the same thing less legibly
+    and cannot be line-split the way one ``Literal`` can.
+    """
+    values: list[str] = []
+    others: list[str] = []
+    for annotation in annotations:
+        if _is_single_literal(annotation):
+            values.append(annotation[len("Literal[") : -1])
+        else:
+            others.append(annotation)
+    folded = [f"Literal[{', '.join(dict.fromkeys(values))}]"] if values else []
+    return " | ".join([*folded, *others])
+
+
 def _declaration(name: str, annotation: str, indent: str) -> list[str]:
     """Declare ``name: annotation``, splitting an over-long ``Literal`` as the formatter would."""
     line = f"{indent}{name}: {annotation}"
-    if len(line) <= _LINE_LENGTH or not (annotation.startswith("Literal[") and annotation.endswith("]")):
+    if len(line) <= _LINE_LENGTH or not _is_single_literal(annotation):
         return [line]
     values = ast.literal_eval(f"[{annotation[len('Literal[') : -1]}]")
     return [f"{indent}{name}: Literal[", *(f"{indent}    {_literal(value)}," for value in values), f"{indent}]"]
@@ -207,8 +241,8 @@ class _TaskStub:
 class _TaskRenderer:
     """Renders the ``TypedDict`` tree for a single task's parameter and result schemas.
 
-    Every generated name is prefixed with the task, so two tasks never fight over a name.
-    Within a task, structurally identical objects collapse onto one type -- the published
+    Every generated name is prefixed with the topic and task, so two tasks never fight over a
+    name. Within a task, structurally identical objects collapse onto one type -- the published
     schemas inline the same shape repeatedly (a filter condition appears at four depths in
     the kriging schema), and one name per shape keeps the stub readable.
 
@@ -230,7 +264,9 @@ class _TaskRenderer:
     _by_pointer: dict[str, str] = field(default_factory=dict, init=False)
 
     def __post_init__(self) -> None:
-        self.prefix = f"{'Sync' if self.blocking else ''}{_camel(self.spec.name)}"
+        # Topic-scoped, not just task-scoped: `geotech` and `gtm` both publish `remesh`,
+        # `fill-holes` and a dozen more, and their shapes are not interchangeable.
+        self.prefix = f"{'Sync' if self.blocking else ''}{_camel(self.spec.topic)}{_camel(self.spec.name)}"
 
     # -- naming ------------------------------------------------------------ #
 
@@ -333,7 +369,7 @@ class _TaskRenderer:
             self._annotation(member, root, (*path, _member_tag(member, index)))
             for index, member in enumerate(members, 1)
         ]
-        return " | ".join(dict.fromkeys(annotations))
+        return _join_union(list(dict.fromkeys(annotations)))
 
     def _of_type(self, json_type: str, node: dict[str, Any], root: dict[str, Any], path: tuple[str, ...]) -> str:
         if json_type == "object":
@@ -417,15 +453,16 @@ class _TaskRenderer:
         properties: dict[str, Any] = schema.get("properties") or {}
         required = list(schema.get("required") or [])
         ordered = [*required, *(name for name in properties if name not in required)]
-        if not all(_identifier(name) for name in ordered):
-            # No keyword-only signature can express these; stay generic for this task.
+        published = {wire: name for name, wire in _wire_names(self.spec).items()}
+        if properties and not published:
+            # The engine could not name these either, and takes them through ``**parameters``.
             return ["**parameters: Any"]
 
         lines = []
         for name in ordered:
             annotation = self._annotation(properties.get(name, {}), schema, (name,))
             default = "" if name in required else " = ..."
-            lines.append(f"{name}: {annotation}{default}")
+            lines.append(f"{published[name]}: {annotation}{default}")
         lines.append(f"preview: bool = {bool(self.spec.feature_flag)!r}")
         return lines
 
@@ -484,10 +521,16 @@ def load_snapshot(snapshot_dir: Path) -> list[TaskResource]:
 
 
 def _snapshot_payload(task: TaskResource) -> dict[str, Any]:
-    """The contents of a snapshot file: the discovery payload, less what the path says."""
+    """The contents of a snapshot file: the discovery payload, less what the path says.
+
+    Deployment-specific fields go too. ``links`` carries the capturing deployment's hostname
+    and org id, and ``key`` its record id for the task -- none of which describe the task's
+    shape, and all of which would rewrite every file the next time someone captures from a
+    different org.
+    """
     payload = task.model_dump(mode="json", exclude_none=True)
-    payload.pop("topic", None)
-    payload.pop("name", None)
+    for implied_or_local in ("topic", "name", "key", "links"):
+        payload.pop(implied_or_local, None)
     return payload
 
 
@@ -606,7 +649,9 @@ def _render_client(topics: list[str], blocking: bool = False) -> list[str]:
         "    def __dir__(self) -> list[str]: ...",
         "    def __repr__(self) -> str: ...",
     ]
-    lines.extend(f"    {topic}: _{'Sync' if blocking else ''}{_camel(topic)}Tasks" for topic in sorted(topics))
+    lines.extend(
+        f"    {_identifier_name(topic)}: _{'Sync' if blocking else ''}{_camel(topic)}Tasks" for topic in sorted(topics)
+    )
     lines.append(f"    def __getattr__(self, name: str) -> _{'Sync' if blocking else ''}UnknownTopic: ...")
     return lines
 
@@ -806,6 +851,30 @@ def _render(tasks: list[TaskResource], snapshot_dir: Path) -> str:
     return "\n".join(preamble) + "\n" + body + "\n"
 
 
+def _formatted(source: str, output: Path) -> str:
+    """Hand the rendered stub to ``ruff format`` rather than imitating it.
+
+    The generator used to emit formatter-ready text by construction, which held while the
+    snapshot was three hand-picked tasks and stopped holding the moment it was not: a long
+    ``Literal`` splits one way, an over-long union in a subscript another, an import a third.
+    Matching that by hand is a losing game, and a stub that is not format-stable fails CI for
+    a reason that has nothing to do with what it describes.
+
+    ``--stdin-filename`` matters: ``.pyi`` files are formatted differently from ``.py``.
+    """
+    try:
+        result = subprocess.run(
+            ["ruff", "format", "--stdin-filename", str(output), "-"],
+            input=source,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+    except FileNotFoundError:
+        raise RuntimeError("ruff is needed to generate the stub; install the 'test' dependency group") from None
+    return result.stdout
+
+
 def generate_stub(snapshot_dir: Path = DEFAULT_SNAPSHOT_DIR, output: Path = DEFAULT_OUTPUT) -> str:
     """Render the engine type stub from a catalogue snapshot.
 
@@ -817,7 +886,7 @@ def generate_stub(snapshot_dir: Path = DEFAULT_SNAPSHOT_DIR, output: Path = DEFA
     tasks = load_snapshot(snapshot_dir)
     if not tasks:
         raise FileNotFoundError(f"no task schemas found in {snapshot_dir}")
-    return _render(tasks, snapshot_dir)
+    return _formatted(_render(tasks, snapshot_dir), output)
 
 
 def capture_snapshot(snapshot_dir: Path = DEFAULT_SNAPSHOT_DIR) -> list[TaskResource]:
@@ -829,7 +898,8 @@ def capture_snapshot(snapshot_dir: Path = DEFAULT_SNAPSHOT_DIR) -> list[TaskReso
 
     :param snapshot_dir: The directory to write the snapshot to.
 
-    :return: The tasks written.
+    :return: The tasks written, which excludes any :data:`_SCRATCH_TOPIC` the deployment
+        happens to be carrying.
     """
     import asyncio
     import os
@@ -849,13 +919,23 @@ def capture_snapshot(snapshot_dir: Path = DEFAULT_SNAPSHOT_DIR) -> list[TaskReso
         async with connector:
             return await DiscoveryClient(connector, UUID(os.environ["EVO_ORG_ID"])).list_tasks()
 
-    tasks = sorted(asyncio.run(_fetch()), key=lambda task: (task.topic, task.name))
+    discovered = sorted(asyncio.run(_fetch()), key=lambda task: (task.topic, task.name))
+    tasks = [task for task in discovered if not _SCRATCH_TOPIC.match(task.topic)]
+    skipped = sorted({task.topic for task in discovered} - {task.topic for task in tasks})
+    if skipped:
+        print(f"skipped scratch topics: {', '.join(skipped)}")
+
     for stale in snapshot_dir.glob("*/*.json"):
         stale.unlink()
     for task in tasks:
         path = snapshot_dir / task.topic / f"{task.name}.json"
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(_snapshot_json(_snapshot_payload(task)))
+    for directory in snapshot_dir.iterdir():
+        # A topic the catalogue dropped leaves its directory behind, and `load_snapshot`
+        # would keep reading it as a topic with no tasks.
+        if directory.is_dir() and not any(directory.iterdir()):
+            directory.rmdir()
 
     manifest = {
         "source": "GET /compute/orgs/{org_id}/tasks?details=true",

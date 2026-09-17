@@ -83,7 +83,7 @@ async def wrong_scalar_type(context: IContext) -> None:
 
 async def value_outside_the_enum(context: IContext) -> None:
     client = ComputeClient(context)
-    await client.geostatistics.normal_score_gcp.run(
+    await client.geostatistics.normal_score.run(
         method="sideways",
         source={"object": "https://example.com/objects/samples", "attribute": "grade"},
         distribution="https://example.com/objects/distribution",
@@ -101,7 +101,7 @@ async def misused_result_attribute(context: IContext) -> None:
     their real types all the way down, which is what this checks.
     """
     client = ComputeClient(context)
-    result = await client.geostatistics.normal_score_gcp.run(
+    result = await client.geostatistics.normal_score.run(
         method="forward",
         source={"object": "https://example.com/objects/samples", "attribute": "grade"},
         distribution="https://example.com/objects/distribution",
@@ -116,7 +116,7 @@ async def misused_result_attribute(context: IContext) -> None:
 async def awaited_blocking_result(context: IContext) -> None:
     """The blocking client has already done the waiting; there is nothing left to await."""
     client = SyncComputeClient(context)
-    result = client.geostatistics.normal_score_gcp.run(
+    result = client.geostatistics.normal_score.run(
         method="forward",
         source={"object": "https://example.com/objects/samples", "attribute": "grade"},
         distribution="https://example.com/objects/distribution",

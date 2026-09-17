@@ -35,7 +35,7 @@ from pathlib import Path
 
 from evo.compute import ComputeClient, ParameterValidationError, SyncComputeClient, _stubgen
 from evo.compute.endpoints.models import TaskResource
-from evo.compute.engine import _signature_from_schema
+from evo.compute.engine import _signature_from_schema, _wire_names
 from evo.compute.overrides import overridden_tasks
 from evo.compute.validation import validate_parameters
 
@@ -141,16 +141,19 @@ class TestGeneratedArtifact(unittest.TestCase):
         to be describable whether or not a snapshot happens to mention the task -- which is
         also what stops a catalogue rename from silently dropping it out of the stub.
         """
-        snapshotted = {
-            (task.topic, task.name.replace("-", "_")) for task in _stubgen.load_snapshot(_stubgen.DEFAULT_SNAPSHOT_DIR)
-        }
-        unsnapshotted = [claim for claim in overridden_tasks() if claim not in snapshotted]
-        self.assertTrue(unsnapshotted, "every override is in the snapshot, so this proves nothing")
+        overridden = overridden_tasks()
+        self.assertTrue(overridden, "no override to check")
 
-        stub = _stubgen.DEFAULT_OUTPUT.read_text()
-        for topic, task in unsnapshotted:
-            with self.subTest(task=f"{topic}.{task}"):
-                self.assertIn(f"    {task}: _{_stubgen._camel(topic)}{_stubgen._camel(task)}", stub)
+        # A snapshot that mentions none of them, which is what a rename leaves behind.
+        with tempfile.TemporaryDirectory() as directory:
+            topic = Path(directory) / "demo"
+            topic.mkdir()
+            (topic / "widget.json").write_text(json.dumps(_spec().model_dump(mode="json")))
+            rendered = _stubgen._render(_stubgen.load_snapshot(Path(directory)), Path(directory))
+
+        for topic_name, task in overridden:
+            with self.subTest(task=f"{topic_name}.{task}"):
+                self.assertIn(f"    {task}: _{_stubgen._camel(topic_name)}{_stubgen._camel(task)}", rendered)
 
     def test_the_client_signatures_are_not_hand_maintained_into_drift(self) -> None:
         """The task surface is generated, but the clients' own methods are written out.
@@ -194,9 +197,9 @@ class TestGeneratedArtifact(unittest.TestCase):
     def test_a_blocking_result_is_rooted_in_the_blocking_classes(self) -> None:
         """Otherwise ``result.target.load()`` would still be declared as a coroutine."""
         stub = _stubgen.DEFAULT_OUTPUT.read_text()
-        self.assertIn("class SyncDeclusteringResult(SyncTaskResult):", stub)
-        self.assertIn("class SyncDeclusteringResultTarget(SyncResultNode):", stub)
-        self.assertIn("    target: SyncDeclusteringResultTarget", stub)
+        self.assertIn("class SyncGeostatisticsDeclusteringResult(SyncTaskResult):", stub)
+        self.assertIn("class SyncGeostatisticsDeclusteringResultTarget(SyncResultNode):", stub)
+        self.assertIn("    target: SyncGeostatisticsDeclusteringResultTarget", stub)
 
 
 class TestAnnotations(unittest.TestCase):
@@ -300,8 +303,8 @@ class TestAnnotations(unittest.TestCase):
                 "properties": {"root": {"$ref": "#/$defs/Node"}},
             }
         )
-        self.assertIn("class WidgetNode(TypedDict):", rendered)
-        self.assertIn("children: NotRequired[list[WidgetNode]]", rendered)
+        self.assertIn("class DemoWidgetNode(TypedDict):", rendered)
+        self.assertIn("children: NotRequired[list[DemoWidgetNode]]", rendered)
 
     def test_identical_shapes_collapse_onto_one_type(self) -> None:
         """The published schemas inline the same shape repeatedly; one name per shape."""
@@ -310,7 +313,7 @@ class TestAnnotations(unittest.TestCase):
             parameters={"type": "object", "properties": {"start": dict(point), "end": dict(point)}},
         )
         self.assertEqual(1, rendered.count("(TypedDict):"))
-        self.assertIn("class WidgetStart(TypedDict):", rendered)
+        self.assertIn("class DemoWidgetStart(TypedDict):", rendered)
 
     def test_union_members_are_named_after_their_discriminating_constant(self) -> None:
         rendered = _render(
@@ -327,8 +330,108 @@ class TestAnnotations(unittest.TestCase):
                 },
             }
         )
-        self.assertIn("class WidgetActionCreate(TypedDict):", rendered)
-        self.assertIn("class WidgetActionUpdate(TypedDict):", rendered)
+        self.assertIn("class DemoWidgetActionCreate(TypedDict):", rendered)
+        self.assertIn("class DemoWidgetActionUpdate(TypedDict):", rendered)
+
+
+class TestNamesTheCatalogueForces(unittest.TestCase):
+    """Shapes the published catalogue actually contains, which a curated snapshot hid.
+
+    Each of these crashed or emitted invalid Python the first time the whole catalogue was
+    captured, so each one is pinned here rather than left to the next capture to rediscover.
+    """
+
+    def _render_all(self, *specs: TaskResource) -> str:
+        with tempfile.TemporaryDirectory() as directory:
+            return _stubgen._render(list(specs), Path(directory))
+
+    def test_two_topics_may_publish_the_same_task_name(self) -> None:
+        """``geotech`` and ``gtm`` both publish ``remesh``, and the shapes differ.
+
+        Names scoped to the task alone collapse onto each other, which is a redefinition
+        rather than a collapse: the second shape silently wins.
+        """
+        nested = {"type": "object", "properties": {"settings": {"type": "object", "properties": {}}}}
+        rendered = self._render_all(
+            _spec(
+                topic="geotech",
+                name="remesh",
+                parameters={
+                    **nested,
+                    "properties": {"settings": {"type": "object", "properties": {"mesh": {"type": "string"}}}},
+                },
+            ),
+            _spec(
+                topic="gtm",
+                name="remesh",
+                parameters={
+                    **nested,
+                    "properties": {"settings": {"type": "object", "properties": {"mesh": {"type": "integer"}}}},
+                },
+            ),
+        )
+        self.assertIn("class GeotechRemeshSettings(TypedDict):", rendered)
+        self.assertIn("class GtmRemeshSettings(TypedDict):", rendered)
+        self.assertEqual([], self._redefined(rendered))
+
+    def _redefined(self, rendered: str) -> list[str]:
+        """Top-level names the stub defines more than once, which is ruff's F811."""
+        defined: list[str] = []
+        for node in ast.parse(rendered).body:
+            if isinstance(node, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
+                defined.append(node.name)
+            elif isinstance(node, ast.Assign):
+                defined.extend(target.id for target in node.targets if isinstance(target, ast.Name))
+        return sorted({name for name in defined if defined.count(name) > 1})
+
+    def test_a_hyphenated_topic_becomes_a_reachable_attribute(self) -> None:
+        """``vis-service`` is not spellable as an attribute or a class name."""
+        rendered = self._render_all(_spec(topic="vis-service", name="tiling"))
+        self.assertIn("    vis_service: _VisServiceTasks", rendered)
+        self.assertIn("class _VisServiceTasks:", rendered)
+        self.assertNotIn("vis-service:", rendered)
+        ast.parse(rendered)
+
+    def test_a_hyphenated_parameter_becomes_a_keyword(self) -> None:
+        """``s2s-user-info`` can only be typed once it is normalised like everything else."""
+        spec = _spec(
+            parameters={
+                "type": "object",
+                "properties": {"s2s-user-info": {"type": "string"}},
+                "required": ["s2s-user-info"],
+            }
+        )
+        self.assertIn("s2s_user_info: str", _stubgen._TaskRenderer(spec).render().run_parameters)
+
+    def test_parameters_that_cannot_be_named_apart_stay_generic(self) -> None:
+        """Two properties normalising onto one keyword leave nothing to bind against.
+
+        The stub and the engine have to agree about that, or one promises a signature the
+        other refuses to accept.
+        """
+        spec = _spec(
+            parameters={
+                "type": "object",
+                "properties": {"user-info": {"type": "string"}, "user_info": {"type": "string"}},
+            }
+        )
+        self.assertEqual(["**parameters: Any"], _stubgen._TaskRenderer(spec).render().run_parameters)
+        self.assertEqual({}, _wire_names(spec))
+
+    def test_sibling_constants_fold_into_one_literal(self) -> None:
+        """A oneOf of consts is a union of single-member Literals until they are folded.
+
+        ``ast.literal_eval`` cannot read ``Literal[200] | Literal[201]``, which is how the
+        published response schemas describe their status codes.
+        """
+        spec = _spec(
+            parameters={
+                "type": "object",
+                "properties": {"status": {"oneOf": [{"const": 200}, {"const": 201}, {"const": 404}]}},
+            }
+        )
+        parameters = _stubgen._TaskRenderer(spec).render().run_parameters
+        self.assertIn("status: Literal[200, 201, 404] = ...", parameters)
 
 
 class TestTaskSurface(unittest.TestCase):
@@ -352,8 +455,8 @@ class TestTaskSurface(unittest.TestCase):
         """Results come back as ``TaskResult``, so the stub declares one rather than a dict."""
         spec = _spec(results={"type": "object", "properties": {"message": {"type": "string"}}})
         stub = _stubgen._TaskRenderer(spec).render()
-        self.assertEqual("WidgetResult", stub.return_type)
-        self.assertIn("class WidgetResult(TaskResult):", stub.types[-1].body)
+        self.assertEqual("DemoWidgetResult", stub.return_type)
+        self.assertIn("class DemoWidgetResult(TaskResult):", stub.types[-1].body)
         # No NotRequired: a declared attribute is what makes ``.load()`` and the nested
         # types reachable, and an attribute cannot be marked absent the way a key can.
         self.assertIn("message: str", stub.types[-1].body)
@@ -380,8 +483,8 @@ class TestTaskSurface(unittest.TestCase):
             results={"type": "object", "properties": {"target": {**target, "properties": {"url": {"type": "string"}}}}},
         )
         names = [generated.name for generated in _stubgen._TaskRenderer(spec).render().types]
-        self.assertIn("WidgetTarget", names)
-        self.assertIn("WidgetResultTarget", names)
+        self.assertIn("DemoWidgetTarget", names)
+        self.assertIn("DemoWidgetResultTarget", names)
 
     def test_a_reference_parameter_accepts_every_handle_the_resolver_takes(self) -> None:
         """The schema declares the resolved URL, but resolution runs first, so the stub
@@ -425,7 +528,7 @@ class TestTaskSurface(unittest.TestCase):
                 },
             }
         )
-        self.assertIn("grid: WidgetGrid | ObjectInput = ...", _stubgen._TaskRenderer(spec).render().run_parameters)
+        self.assertIn("grid: DemoWidgetGrid | ObjectInput = ...", _stubgen._TaskRenderer(spec).render().run_parameters)
 
     def test_an_object_and_attribute_frame_also_takes_a_typed_attribute(self) -> None:
         """``_frame_from_attribute``: the attribute already knows the object it belongs to."""
@@ -444,7 +547,7 @@ class TestTaskSurface(unittest.TestCase):
             }
         )
         parameters = _stubgen._TaskRenderer(spec).render().run_parameters
-        self.assertIn("source: WidgetSource | AnyTypedAttribute = ...", parameters)
+        self.assertIn("source: DemoWidgetSource | AnyTypedAttribute = ...", parameters)
 
     def test_a_target_attribute_slot_also_takes_a_name(self) -> None:
         """``_resolve_target_attribute`` turns a bare string into a create operation."""
@@ -461,7 +564,7 @@ class TestTaskSurface(unittest.TestCase):
             }
         )
         parameters = _stubgen._TaskRenderer(spec).render().run_parameters
-        self.assertIn("attribute: WidgetAttribute | AttributeInput = ...", parameters)
+        self.assertIn("attribute: DemoWidgetAttribute | AttributeInput = ...", parameters)
 
     def test_a_shorthand_is_not_offered_for_a_result(self) -> None:
         """Results are what came back, not something a caller may abbreviate."""
@@ -509,7 +612,7 @@ class TestTaskSurface(unittest.TestCase):
                 },
             }
         )
-        self.assertIn("WidgetGroup = TypedDict(", rendered)
+        self.assertIn("DemoWidgetGroup = TypedDict(", rendered)
         self.assertIn('"class": str,', rendered)
         self.assertIn('"import": NotRequired[int],', rendered)
         self.assertNotIn("total=False", rendered)
@@ -518,11 +621,27 @@ class TestTaskSurface(unittest.TestCase):
 class TestSnapshotLoading(unittest.TestCase):
     def test_identity_comes_from_the_path(self) -> None:
         tasks = {(task.topic, task.name) for task in _stubgen.load_snapshot(_stubgen.DEFAULT_SNAPSHOT_DIR)}
-        self.assertIn(("geostatistics", "kriging-gcp"), tasks)
+        self.assertIn(("geostatistics", "kriging"), tasks)
 
     def test_empty_snapshot_is_rejected(self) -> None:
         with self.assertRaises(FileNotFoundError):
             _stubgen.generate_stub(Path(__file__).parent / "does-not-exist")
+
+    def test_no_scratch_topic_reaches_the_stub(self) -> None:
+        """Deployments carry throwaway topics, and the stub is public API."""
+        captured = {task.topic for task in _stubgen.load_snapshot(_stubgen.DEFAULT_SNAPSHOT_DIR)}
+        self.assertEqual([], sorted(topic for topic in captured if _stubgen._SCRATCH_TOPIC.match(topic)))
+
+    def test_the_snapshot_carries_no_deployment_of_its_own(self) -> None:
+        """`links` names the capturing deployment's host and org id; `key` is its record id.
+
+        None of it describes a task, and committing it would put one org's identifiers in
+        every file and rewrite all of them on the next capture from anywhere else.
+        """
+        for path in sorted(_stubgen.DEFAULT_SNAPSHOT_DIR.glob("*/*.json")):
+            with self.subTest(task=f"{path.parent.name}/{path.stem}"):
+                payload = json.loads(path.read_text())
+                self.assertEqual([], [field for field in ("key", "links") if field in payload])
 
     def test_the_committed_snapshot_is_in_capture_format(self) -> None:
         """So the next refresh diffs the catalogue rather than reformatting every line."""
