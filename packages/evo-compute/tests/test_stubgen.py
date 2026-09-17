@@ -36,6 +36,7 @@ from pathlib import Path
 from evo.compute import ComputeClient, ParameterValidationError, SyncComputeClient, _stubgen
 from evo.compute.endpoints.models import TaskResource
 from evo.compute.engine import _signature_from_schema
+from evo.compute.overrides import overridden_tasks
 from evo.compute.validation import validate_parameters
 
 _CHECKS_DIR = _stubgen.DEFAULT_SNAPSHOT_DIR.parent / "checks"
@@ -106,8 +107,9 @@ class TestGeneratedArtifact(unittest.TestCase):
 
     def test_stub_signatures_match_the_runtime_signatures(self) -> None:
         """What the stub advertises is what :func:`_signature_from_schema` will bind."""
+        claimed = set(overridden_tasks())
         for task in _stubgen.load_snapshot(_stubgen.DEFAULT_SNAPSHOT_DIR):
-            if _stubgen._override_runner(task) is not None:
+            if (task.topic, task.name.replace("-", "_")) in claimed:
                 continue  # an overridden task is bound by its runner, not by the schema
             with self.subTest(task=f"{task.topic}.{task.name}"):
                 stub = _stubgen._TaskRenderer(task).render()
@@ -121,18 +123,34 @@ class TestGeneratedArtifact(unittest.TestCase):
         generating a schema-shaped ``run`` beside it would advertise arguments the override
         does not take.
         """
-        overridden = [
-            task for task in _stubgen.load_snapshot(_stubgen.DEFAULT_SNAPSHOT_DIR) if _stubgen._override_runner(task)
-        ]
-        self.assertTrue(overridden, "no overridden task in the snapshot to check")
+        overridden = overridden_tasks()
+        self.assertTrue(overridden, "no override to check")
 
         stub = _stubgen.DEFAULT_OUTPUT.read_text()
-        for task in overridden:
-            with self.subTest(task=f"{task.topic}.{task.name}"):
-                module, runner = _stubgen._override_runner(task)
-                alias = f"_{_stubgen._camel(task.topic)}{_stubgen._camel(task.name)}"
+        for topic, task in overridden:
+            with self.subTest(task=f"{topic}.{task}"):
+                module, runner = _stubgen._override_runner(topic, task)
+                alias = f"_{_stubgen._camel(topic)}{_stubgen._camel(task)}"
                 self.assertIn(f"from {module} import {runner} as {alias}", stub)
                 self.assertNotIn(f"class {alias}:", stub)
+
+    def test_an_override_is_described_without_a_catalogue(self) -> None:
+        """The stub follows the overrides package, not the snapshot.
+
+        An override applies to whatever the platform advertises under that name, so it has
+        to be describable whether or not a snapshot happens to mention the task -- which is
+        also what stops a catalogue rename from silently dropping it out of the stub.
+        """
+        snapshotted = {
+            (task.topic, task.name.replace("-", "_")) for task in _stubgen.load_snapshot(_stubgen.DEFAULT_SNAPSHOT_DIR)
+        }
+        unsnapshotted = [claim for claim in overridden_tasks() if claim not in snapshotted]
+        self.assertTrue(unsnapshotted, "every override is in the snapshot, so this proves nothing")
+
+        stub = _stubgen.DEFAULT_OUTPUT.read_text()
+        for topic, task in unsnapshotted:
+            with self.subTest(task=f"{topic}.{task}"):
+                self.assertIn(f"    {task}: _{_stubgen._camel(topic)}{_stubgen._camel(task)}", stub)
 
     def test_the_client_signatures_are_not_hand_maintained_into_drift(self) -> None:
         """The task surface is generated, but the clients' own methods are written out.

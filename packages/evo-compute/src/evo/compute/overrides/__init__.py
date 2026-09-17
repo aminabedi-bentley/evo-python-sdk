@@ -39,12 +39,31 @@ What it replaces is the surface, not the plumbing.
 from __future__ import annotations
 
 import importlib
+import pkgutil
 from functools import lru_cache
+from pathlib import Path
 from types import ModuleType
 
 __all__ = [
     "load_override",
+    "overridden_tasks",
 ]
+
+
+def overridden_tasks() -> list[tuple[str, str]]:
+    """Every ``(topic, task)`` a hand-written runner claims, as Python spells the names.
+
+    Read from this package rather than from a task catalogue, because an override is a
+    decision made in code: it applies to whatever the platform advertises under that name,
+    and it has to be describable without anyone having fetched a catalogue first.
+    """
+    root = Path(__file__).resolve().parent
+    claimed: list[tuple[str, str]] = []
+    for topic in sorted(module.name for module in pkgutil.iter_modules([str(root)]) if module.ispkg):
+        for task in sorted(module.name for module in pkgutil.iter_modules([str(root / topic)])):
+            if load_override(topic, task) is not None:
+                claimed.append((topic, task))
+    return claimed
 
 
 @lru_cache(maxsize=None)

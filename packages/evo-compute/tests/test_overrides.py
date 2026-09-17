@@ -14,7 +14,7 @@
 Three things are worth holding an override to, and they are the three sections below.
 
 It has to be reached. The module path is the only registration, so what matters is that
-``client.geostatistics.kriging_gcp`` is the hand-written runner while every other task --
+``client.geostatistics.kriging`` is the hand-written runner while every other task --
 and the same task through ``arun`` -- is still generic.
 
 It has to earn its place. An override exists to do what the generic path cannot, so each
@@ -42,7 +42,7 @@ from evo.compute import ParameterValidationError, SyncComputeClient, TaskResourc
 from evo.compute.discovery import DiscoveryClient
 from evo.compute.engine import _BlockingRunner, _TaskProxy
 from evo.compute.overrides import load_override
-from evo.compute.overrides.geostatistics.kriging_gcp import KrigingGcpRunner
+from evo.compute.overrides.geostatistics.kriging import KrigingOverride
 from evo.compute.tasks import CreateAttribute, Source, Target, UpdateAttribute
 from evo.compute.tasks.common import Filter, FilterCondition
 from evo.compute.tasks.geostatistics.kriging import KrigingMethod, KrigingResult, KrigingRunner
@@ -72,14 +72,12 @@ TASK_RESULT = {
 
 
 def kriging_catalogue(**overrides: Any) -> list[TaskResource]:
-    """The kriging schema, advertised under both names the two paths reach it by.
+    """The kriging schema as the catalogue advertises it.
 
-    The hand-written runner submits ``kriging``; the catalogue this override is written
-    against advertises ``kriging-gcp``. Serving one schema under both names keeps the
-    comparison about the payload rather than about which name each path happens to use.
+    The runner, the override and the catalogue all name this task ``kriging``, so the
+    comparison is about the payload rather than about which name each path happens to use.
     """
-    spec = task_spec(KrigingRunner)
-    return [spec.model_copy(update=overrides), spec.model_copy(update={"name": "kriging-gcp", **overrides})]
+    return [task_spec(KrigingRunner).model_copy(update=overrides)]
 
 
 class OverrideTestCase(PayloadParityTestCase):
@@ -116,7 +114,7 @@ class OverrideTestCase(PayloadParityTestCase):
         """The payload the override submits for ``inputs``."""
         with self.catalogue, _capture_submit("evo.compute.engine") as submit:
             with self.assertRaises(_SubmitCaptured):
-                await self.client.geostatistics.kriging_gcp.run(**inputs)
+                await self.client.geostatistics.kriging.run(**inputs)
         return submit.await_args.kwargs["parameters"]
 
 
@@ -127,50 +125,48 @@ class OverrideTestCase(PayloadParityTestCase):
 
 class TestTheSeam(OverrideTestCase):
     def test_an_overridden_task_is_served_by_its_own_runner(self) -> None:
-        """The module at ``overrides/geostatistics/kriging_gcp.py`` claims the task."""
-        self.assertIsInstance(self.client.geostatistics.kriging_gcp, KrigingGcpRunner)
+        """The module at ``overrides/geostatistics/kriging.py`` claims the task."""
+        self.assertIsInstance(self.client.geostatistics.kriging, KrigingOverride)
 
     def test_the_blocking_client_reaches_the_same_override(self) -> None:
         """``SyncComputeClient`` wraps the runner rather than getting a generic proxy."""
-        runner = SyncComputeClient(self.context).geostatistics.kriging_gcp
+        runner = SyncComputeClient(self.context).geostatistics.kriging
         self.assertIsInstance(runner, _BlockingRunner)
         self.assertFalse(inspect.iscoroutinefunction(runner.run))
         # The runner's own members are still reachable through the wrapper.
-        self.assertEqual("<compute task 'geostatistics'.'kriging_gcp' (override)>", repr(runner))
+        self.assertEqual("<compute task 'geostatistics'.'kriging' (override)>", repr(runner))
 
     def test_the_blocking_client_runs_the_override_without_await(self) -> None:
         with self.completed_job(TASK_RESULT) as submit:
-            result = SyncComputeClient(self.context).geostatistics.kriging_gcp.run(**self.inputs())
+            result = SyncComputeClient(self.context).geostatistics.kriging.run(**self.inputs())
 
-        self.assertEqual("kriging-gcp", submit.await_args.kwargs["task"])
+        self.assertEqual("kriging", submit.await_args.kwargs["task"])
         self.assertIsInstance(result, KrigingResult)
 
     def test_the_blocking_client_surfaces_the_overrides_own_refusals(self) -> None:
         """The checks the runner adds are not bypassed by going through the bridge."""
         with self.catalogue:
             with self.assertRaises(ParameterValidationError) as caught:
-                SyncComputeClient(self.context).geostatistics.kriging_gcp.run(
-                    **self.inputs(search=_search(min_samples=99))
-                )
+                SyncComputeClient(self.context).geostatistics.kriging.run(**self.inputs(search=_search(min_samples=99)))
         self.assertIn("exceeds max_samples", str(caught.exception))
 
     def test_every_other_task_stays_generic(self) -> None:
         """An override is one task opting out, not a change to how tasks are reached."""
         self.assertIsInstance(self.client.geostatistics.declustering, _TaskProxy)
-        self.assertIsInstance(self.client.geostatistics.kriging, _TaskProxy)
+        self.assertIsInstance(self.client.geostatistics.normal_score, _TaskProxy)
         self.assertIsInstance(self.client.converter.obj_import, _TaskProxy)
 
     def test_reaching_a_task_still_costs_no_discovery(self) -> None:
         """``bind`` is handed the client, not a spec, so the seam keeps attribute access free."""
         get_topic_tasks = mock.AsyncMock(return_value=kriging_catalogue())
         with mock.patch.object(DiscoveryClient, "get_topic_tasks", get_topic_tasks):
-            _ = self.client.geostatistics.kriging_gcp
+            _ = self.client.geostatistics.kriging
         get_topic_tasks.assert_not_awaited()
 
     def test_a_task_is_keyed_as_the_caller_spells_it(self) -> None:
-        """``kriging-gcp`` is reached as ``kriging_gcp``, so that is where its module lives."""
-        self.assertIsNotNone(load_override("geostatistics", "kriging_gcp"))
-        self.assertIsNone(load_override("geostatistics", "kriging-gcp"))
+        """A hyphenated task is reached with underscores, so that is where its module lives."""
+        self.assertIsNotNone(load_override("geostatistics", "kriging"))
+        self.assertIsNone(load_override("geostatistics", "normal-score"))
         self.assertIsNone(load_override("geostatistics", "declustering"))
         self.assertIsNone(load_override("no-such-topic", "no_such_task"))
 
@@ -184,7 +180,7 @@ class TestTheSeam(OverrideTestCase):
         error = ModuleNotFoundError("No module named 'somethingelse'", name="somethingelse")
         with mock.patch("importlib.import_module", side_effect=error):
             with self.assertRaises(ModuleNotFoundError):
-                load_override.__wrapped__("geostatistics", "kriging_gcp")
+                load_override.__wrapped__("geostatistics", "kriging")
 
     async def test_arun_always_takes_the_generic_path(self) -> None:
         """The generic route to an overridden task stays open, and is what parity compares to."""
@@ -192,7 +188,7 @@ class TestTheSeam(OverrideTestCase):
             with self.assertRaises(_SubmitCaptured):
                 await self.client.arun(
                     "geostatistics",
-                    "kriging-gcp",
+                    "kriging",
                     {
                         "source": {"object": POINTSET_URL, "attribute": GRADE_ATTRIBUTE},
                         "target": {"object": TARGET_URL, "attribute": {"operation": "create", "name": "grade"}},
@@ -201,7 +197,7 @@ class TestTheSeam(OverrideTestCase):
                         "kriging_method": {"type": "ordinary"},
                     },
                 )
-        self.assertEqual("kriging-gcp", submit.await_args.kwargs["task"])
+        self.assertEqual("kriging", submit.await_args.kwargs["task"])
 
 
 # --------------------------------------------------------------------------- #
@@ -213,17 +209,17 @@ class TestWhatTheOverrideAdds(OverrideTestCase):
     async def test_valid_parameters_are_accepted(self) -> None:
         """Anti-vacuous guard: the checks below must reject their own case, not every case."""
         with self.completed_job(TASK_RESULT) as submit:
-            await self.client.geostatistics.kriging_gcp.run(**self.inputs())
+            await self.client.geostatistics.kriging.run(**self.inputs())
         submit.assert_awaited_once()
 
     async def test_a_search_that_can_never_be_satisfied_is_refused(self) -> None:
         """Each bound is legal on its own; the schema has no way to say they must agree."""
         with self.catalogue, _capture_submit("evo.compute.engine") as submit:
             with self.assertRaises(ParameterValidationError) as caught:
-                await self.client.geostatistics.kriging_gcp.run(**self.inputs(search=_search(min_samples=99)))
+                await self.client.geostatistics.kriging.run(**self.inputs(search=_search(min_samples=99)))
 
         self.assertIn("min_samples (99) exceeds max_samples (20)", str(caught.exception))
-        self.assertEqual("geostatistics.kriging_gcp", caught.exception.task)
+        self.assertEqual("geostatistics.kriging", caught.exception.task)
         submit.assert_not_awaited()
 
     async def test_estimating_an_attribute_from_itself_is_refused(self) -> None:
@@ -231,7 +227,7 @@ class TestWhatTheOverrideAdds(OverrideTestCase):
         target = Target(object=POINTSET_URL, attribute=UpdateAttribute(reference=GRADE_ATTRIBUTE))
         with self.catalogue, _capture_submit("evo.compute.engine") as submit:
             with self.assertRaises(ParameterValidationError) as caught:
-                await self.client.geostatistics.kriging_gcp.run(**self.inputs(target=target))
+                await self.client.geostatistics.kriging.run(**self.inputs(target=target))
 
         self.assertIn("also the source attribute", str(caught.exception))
         submit.assert_not_awaited()
@@ -240,7 +236,7 @@ class TestWhatTheOverrideAdds(OverrideTestCase):
         """The check is attribute-level: writing an estimate back onto the source object is fine."""
         target = Target(object=POINTSET_URL, attribute=UpdateAttribute(reference="attributes[?name=='estimate']"))
         with self.completed_job(TASK_RESULT) as submit:
-            await self.client.geostatistics.kriging_gcp.run(**self.inputs(target=target))
+            await self.client.geostatistics.kriging.run(**self.inputs(target=target))
         submit.assert_awaited_once()
 
     async def test_a_versioned_source_url_is_still_the_same_object(self) -> None:
@@ -249,7 +245,7 @@ class TestWhatTheOverrideAdds(OverrideTestCase):
         target = Target(object=POINTSET_URL, attribute=UpdateAttribute(reference=GRADE_ATTRIBUTE))
         with self.catalogue, _capture_submit("evo.compute.engine") as submit:
             with self.assertRaises(ParameterValidationError):
-                await self.client.geostatistics.kriging_gcp.run(**self.inputs(source=source, target=target))
+                await self.client.geostatistics.kriging.run(**self.inputs(source=source, target=target))
         submit.assert_not_awaited()
 
     async def test_the_same_object_written_a_different_way_is_still_the_same_object(self) -> None:
@@ -266,20 +262,20 @@ class TestWhatTheOverrideAdds(OverrideTestCase):
                 target = Target(object=canonical, attribute=UpdateAttribute(reference=GRADE_ATTRIBUTE))
                 with self.catalogue, _capture_submit("evo.compute.engine") as submit:
                     with self.assertRaises(ParameterValidationError):
-                        await self.client.geostatistics.kriging_gcp.run(**self.inputs(source=source, target=target))
+                        await self.client.geostatistics.kriging.run(**self.inputs(source=source, target=target))
                 submit.assert_not_awaited()
 
     async def test_the_same_attribute_on_a_different_object_is_allowed(self) -> None:
         """The other direction: the same expression against another object is not a collision."""
         target = Target(object=TARGET_URL, attribute=UpdateAttribute(reference=GRADE_ATTRIBUTE))
         with self.completed_job(TASK_RESULT) as submit:
-            await self.client.geostatistics.kriging_gcp.run(**self.inputs(target=target))
+            await self.client.geostatistics.kriging.run(**self.inputs(target=target))
         submit.assert_awaited_once()
 
     async def test_the_result_is_the_typed_one(self) -> None:
         """A hand-curated result with helpers the generic ``TaskResult`` could not synthesise."""
         with self.completed_job(TASK_RESULT):
-            result = await self.client.geostatistics.kriging_gcp.run(**self.inputs())
+            result = await self.client.geostatistics.kriging.run(**self.inputs())
 
         self.assertIsInstance(result, KrigingResult)
         self.assertEqual("Kriging complete.", result.message)
@@ -289,7 +285,7 @@ class TestWhatTheOverrideAdds(OverrideTestCase):
 
     def test_the_signature_is_the_hand_written_one(self) -> None:
         """Not synthesised from the schema: the arguments read as the typed SDK names them."""
-        parameters = inspect.signature(self.client.geostatistics.kriging_gcp.run).parameters
+        parameters = inspect.signature(self.client.geostatistics.kriging.run).parameters
         self.assertIn("search", parameters)  # the schema calls this ``neighborhood``
         self.assertIn("method", parameters)  # the schema calls this ``kriging_method``
         self.assertIn("source_filter", parameters)  # folded into ``source``; not a task parameter
@@ -352,10 +348,10 @@ class TestPayloadFidelity(OverrideTestCase):
         with mock.patch.object(DiscoveryClient, "get_topic_tasks", mock.AsyncMock(return_value=catalogue)):
             with _capture_submit("evo.compute.engine") as submit:
                 with self.assertRaises(_SubmitCaptured):
-                    await self.client.geostatistics.kriging_gcp.run(**self.inputs())
+                    await self.client.geostatistics.kriging.run(**self.inputs())
                 self.assertTrue(submit.await_args.kwargs["preview"])
 
                 with self.assertRaises(_SubmitCaptured):
-                    await self.client.geostatistics.kriging_gcp.run(**self.inputs(), preview=False)
+                    await self.client.geostatistics.kriging.run(**self.inputs(), preview=False)
                 self.assertFalse(submit.await_args.kwargs["preview"])
                 self.assertNotIn("preview", submit.await_args.kwargs["parameters"])
