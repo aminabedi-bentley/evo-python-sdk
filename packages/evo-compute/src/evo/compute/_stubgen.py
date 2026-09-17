@@ -188,6 +188,11 @@ class _TaskStub:
     types: list[_GeneratedType]
     run_parameters: list[str]
     return_type: str
+    blocking: bool = False
+
+    @property
+    def topic_class(self) -> str:
+        return f"_{'Sync' if self.blocking else ''}{_camel(self.topic)}Tasks"
 
 
 @dataclass
@@ -198,9 +203,16 @@ class _TaskRenderer:
     Within a task, structurally identical objects collapse onto one type -- the published
     schemas inline the same shape repeatedly (a filter condition appears at four depths in
     the kriging schema), and one name per shape keeps the stub readable.
+
+    Rendered a second time with ``blocking`` set, a task yields the mirror
+    :class:`~evo.compute.engine.SyncComputeClient` hands back: the same result tree, named
+    ``Sync...`` and rooted in the blocking result classes, so ``result.target.load()`` is an
+    object rather than a coroutine. Only the result side is generated twice -- the parameters
+    are identical, and their types are shared.
     """
 
     spec: TaskResource
+    blocking: bool = False
 
     prefix: str = field(init=False)
     section: str = field(default="", init=False)
@@ -210,7 +222,7 @@ class _TaskRenderer:
     _by_pointer: dict[str, str] = field(default_factory=dict, init=False)
 
     def __post_init__(self) -> None:
-        self.prefix = _camel(self.spec.name)
+        self.prefix = f"{'Sync' if self.blocking else ''}{_camel(self.spec.name)}"
 
     # -- naming ------------------------------------------------------------ #
 
@@ -257,7 +269,7 @@ class _TaskRenderer:
         # A result is what the platform sent back, so it arrives as a ``ResultNode`` -- a dict
         # that also loads what its references point at. Declaring the keys as attributes is
         # what makes ``result.target.attribute.name`` and ``.load()`` type-check together.
-        base = base or ("ResultNode" if self.section == "Result" else "TypedDict")
+        base = base or (self._result_node if self.section == "Result" else "TypedDict")
         hydrated = base != "TypedDict"
 
         annotations: dict[str, str] = {}
@@ -412,24 +424,35 @@ class _TaskRenderer:
     def _return_type(self) -> str:
         results = self.spec.results
         if not isinstance(results, dict) or not results.get("properties"):
-            return "TaskResult"
+            return self._task_result
         # Everything reachable from the results schema is named ``<Task>Result...``, so an
         # input and an output shape sharing a schema title do not collide.
         self.section = "Result"
-        return self._typed_dict(results, results, ("result",), name_override=f"{self.prefix}Result", base="TaskResult")
+        return self._typed_dict(
+            results, results, ("result",), name_override=f"{self.prefix}Result", base=self._task_result
+        )
 
-    def render(self) -> _TaskStub:
+    @property
+    def _task_result(self) -> str:
+        return "SyncTaskResult" if self.blocking else "TaskResult"
+
+    @property
+    def _result_node(self) -> str:
+        return "SyncResultNode" if self.blocking else "ResultNode"
+
+    def render(self, run_parameters: list[str] | None = None) -> _TaskStub:
         # Parameters first, so the shapes callers write get the unqualified names.
-        run_parameters = self._run_parameters()
+        run_parameters = self._run_parameters() if run_parameters is None else run_parameters
         return_type = self._return_type()
         return _TaskStub(
             topic=self.spec.topic,
             attribute=self.spec.name.replace("-", "_"),
-            class_name=f"_{_camel(self.spec.topic)}{_camel(self.spec.name)}",
+            class_name=f"_{'Sync' if self.blocking else ''}{_camel(self.spec.topic)}{_camel(self.spec.name)}",
             description=(self.spec.description or "").strip(),
             types=self.types,
             run_parameters=run_parameters,
             return_type=return_type,
+            blocking=self.blocking,
         )
 
 
@@ -491,19 +514,24 @@ def _header(snapshot_dir: Path) -> list[str]:
         "#",
         "# The runtime is always live, so tasks published after the snapshot still run --",
         "# they are simply not statically known until the snapshot is refreshed. Use",
-        "# `ComputeClient.arun(topic, task, parameters)` to reach them.",
+        "# `ComputeClient.arun(topic, task, parameters)`, or `SyncComputeClient.run(...)`,",
+        "# to reach them.",
     ]
 
 
-def _render_client(stubs: list[_TaskStub]) -> list[str]:
-    topics = sorted({stub.topic for stub in stubs})
+def _render_client(stubs: list[_TaskStub], blocking: bool = False) -> list[str]:
+    name = "SyncComputeClient" if blocking else "ComputeClient"
+    entry = "blocking" if blocking else "asynchronous"
+    other = "ComputeClient" if blocking else "SyncComputeClient"
+    method = "run" if blocking else "arun"
     lines = [
-        "class ComputeClient:",
+        f"class {name}:",
         _docstring(
-            "Instance-bound async entry point to the compute task catalogue.\n\n"
+            f"Instance-bound {entry} entry point to the compute task catalogue.\n\n"
             "The topic and task attributes below come from a point-in-time snapshot of the\n"
             "discovery catalogue. The runtime resolves them live, so a task missing from this\n"
-            "stub still runs -- reach it with :meth:`arun`.",
+            f"stub still runs -- reach it with :meth:`{method}`.\n\n"
+            f"See :class:`{other}` for the same catalogue through the other entry point.",
             "    ",
         ),
         "",
@@ -516,7 +544,7 @@ def _render_client(stubs: list[_TaskStub]) -> list[str]:
         "        deep_validation: bool = ...,",
         "        check_schemas: bool | None = ...,",
         "    ) -> None: ...",
-        "    async def arun(",
+        f"    {'' if blocking else 'async '}def {method}(",
         "        self,",
         "        topic: str,",
         "        task: str,",
@@ -525,7 +553,7 @@ def _render_client(stubs: list[_TaskStub]) -> list[str]:
         "        validate: bool | None = ...,",
         "        deep_validation: bool | None = ...,",
         "        check_schemas: bool | None = ...,",
-        "    ) -> TaskResult:",
+        f"    ) -> {'SyncTaskResult' if blocking else 'TaskResult'}:",
         _docstring(
             "Run any task by name, including one this stub does not know about.",
             "        ",
@@ -534,12 +562,19 @@ def _render_client(stubs: list[_TaskStub]) -> list[str]:
         "    def __dir__(self) -> list[str]: ...",
         "    def __repr__(self) -> str: ...",
     ]
-    lines.extend(f"    {topic}: _{_camel(topic)}Tasks" for topic in topics)
+    lines.extend(
+        f"    {topic}: _{'Sync' if blocking else ''}{_camel(topic)}Tasks"
+        for topic in sorted({stub.topic for stub in stubs})
+    )
     return lines
 
 
 def _render(tasks: list[TaskResource], snapshot_dir: Path) -> str:
-    stubs = [_TaskRenderer(task).render() for task in sorted(tasks, key=lambda task: (task.topic, task.name))]
+    ordered = sorted(tasks, key=lambda task: (task.topic, task.name))
+    awaited = [_TaskRenderer(task).render() for task in ordered]
+    # The blocking mirror reuses the parameter types verbatim; only the results differ.
+    blocking = [_TaskRenderer(task, blocking=True).render(stub.run_parameters) for task, stub in zip(ordered, awaited)]
+    stubs = [*awaited, *blocking]
 
     blocks: list[str] = []
     for stub in stubs:
@@ -550,7 +585,7 @@ def _render(tasks: list[TaskResource], snapshot_dir: Path) -> str:
         if stub.description:
             lines.append(_docstring(stub.description, "    "))
             lines.append("")
-        lines.append("    async def run(")
+        lines.append(f"    {'' if stub.blocking else 'async '}def run(")
         lines.append("        self,")
         if stub.run_parameters != ["**parameters: Any"]:
             lines.append("        *,")
@@ -565,16 +600,19 @@ def _render(tasks: list[TaskResource], snapshot_dir: Path) -> str:
             lines.append(f"    ) -> {stub.return_type}: ...")
         blocks.append("\n".join(lines))
 
-    for topic in sorted({stub.topic for stub in stubs}):
-        lines = [
-            f"class _{_camel(topic)}Tasks:",
-            _docstring(f"Tasks published under the ``{topic}`` topic.", "    "),
-            "",
-        ]
-        lines.extend(f"    {stub.attribute}: {stub.class_name}" for stub in stubs if stub.topic == topic)
-        blocks.append("\n".join(lines))
+    for family in (awaited, blocking):
+        for topic in sorted({stub.topic for stub in family}):
+            in_topic = [stub for stub in family if stub.topic == topic]
+            lines = [
+                f"class {in_topic[0].topic_class}:",
+                _docstring(f"Tasks published under the ``{topic}`` topic.", "    "),
+                "",
+            ]
+            lines.extend(f"    {stub.attribute}: {stub.class_name}" for stub in in_topic)
+            blocks.append("\n".join(lines))
 
-    blocks.append("\n".join(_render_client(stubs)))
+    blocks.append("\n".join(_render_client(awaited)))
+    blocks.append("\n".join(_render_client(blocking, blocking=True)))
 
     body = "\n\n".join(blocks)
     used = {name: alias for name, alias in _REFERENCE_ALIASES.items() if re.search(rf"\b{name}\b", body)}
@@ -591,6 +629,7 @@ def _render(tasks: list[TaskResource], snapshot_dir: Path) -> str:
         *(["Protocol"] if "Protocol)" in declared else []),
     ]
     extensions = [name for name in ("NotRequired", "TypedDict") if name in body]
+    outputs = [name for name in ("ResultNode", "SyncResultNode", "SyncTaskResult", "TaskResult") if name in body]
     imports = [
         f"from typing import {', '.join(typing_names)}",
         *(["from uuid import UUID"] if "ObjectInput" in used else []),
@@ -600,10 +639,17 @@ def _render(tasks: list[TaskResource], snapshot_dir: Path) -> str:
         *(["from evo.objects.typed import BaseObject, DownloadedObject"] if "ObjectInput" in used else []),
         *([f"from typing_extensions import {', '.join(extensions)}"] if extensions else []),
         "",
-        "from .outputs import ResultNode, TaskResult",
+        f"from .outputs import {', '.join(outputs)}",
         *(["from .tasks.common.source_target import AnyTypedAttribute"] if "AnyTypedAttribute" in declared else []),
     ]
-    preamble = [*_header(snapshot_dir), "", *imports, "", '__all__ = ["ComputeClient"]', *(aliases or [""])]
+    preamble = [
+        *_header(snapshot_dir),
+        "",
+        *imports,
+        "",
+        '__all__ = ["ComputeClient", "SyncComputeClient"]',
+        *(aliases or [""]),
+    ]
     return "\n".join(preamble) + "\n" + body + "\n"
 
 

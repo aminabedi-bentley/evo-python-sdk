@@ -16,7 +16,7 @@ A task's results are references too -- ``{"reference": "<url>", "name": ..., "sc
 task's published ``results`` schema marks each of those with an ``output`` annotation, which
 is all :class:`TaskResult` needs to hand the caller a loadable object instead of a URL::
 
-    result = await client.geostatistics.kriging_gcp.run(...)
+    result = await client.geostatistics.kriging.run(...)
     grid = await result.target.load()
     frame = await result.target.to_dataframe()
     estimates = await result.target.attribute.to_dataframe()
@@ -28,6 +28,9 @@ object family keeps attributes in. A task publishes one expression for every fam
 supports, so the container it names can be the wrong one for the object actually written --
 :meth:`ResultNode.load` repairs it from ``attribute_path`` rather than reporting a miss.
 
+:class:`SyncTaskResult` is the same tree with blocking loaders, which is what
+:class:`~evo.compute.engine.SyncComputeClient` returns.
+
 :class:`TaskResult` and :class:`ResultNode` subclass :class:`dict`, so the raw payload is
 still available exactly as the platform sent it -- ``result["target"]["reference"]`` and
 ``result == {...}`` behave as they did before hydration existed. Attribute access and the
@@ -36,11 +39,14 @@ loaders are additions on top, driven entirely by the schema; nothing here is tas
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, Any
 
 from evo.common import IContext
 from evo.objects import ObjectSchema
 from evo.objects.typed import BaseObject, object_from_reference
+
+from ._sync import run_sync
 
 # ``attribute_path`` means the same thing on the way in and on the way out, so both sides
 # read it through the same helpers rather than agreeing by convention.
@@ -52,6 +58,8 @@ if TYPE_CHECKING:
 
 __all__ = [
     "ResultNode",
+    "SyncResultNode",
+    "SyncTaskResult",
     "TaskResult",
 ]
 
@@ -85,12 +93,18 @@ class ResultNode(dict):
         self._root: dict = self if root is None else root
         self._path = path
         properties = self._schema.get("properties", {}) or {}
+        node_type = self._node_type()
         super().__init__(
             {
-                name: _hydrate(value, properties.get(name), context, self._root, (*path, name))
+                name: _hydrate(value, properties.get(name), context, self._root, (*path, name), node_type)
                 for name, value in payload.items()
             }
         )
+
+    @classmethod
+    def _node_type(cls) -> type[ResultNode]:
+        """The class nested objects are hydrated into. The blocking mirror answers with its own."""
+        return ResultNode
 
     def __getattr__(self, name: str) -> Any:
         # Result fields are whatever the payload carried, so they cannot be declared up
@@ -127,7 +141,9 @@ class ResultNode(dict):
 
         :raises TypeError: If this node is not a geoscience object or attribute reference.
         """
-        loaded = await self.load()
+        # Named explicitly rather than through ``self``: the blocking mirror overrides
+        # ``load`` with a version that returns the object instead of a coroutine.
+        loaded = await ResultNode.load(self)
         if isinstance(loaded, BaseObject):
             return await loaded.to_dataframe(*keys)
         if keys:
@@ -169,22 +185,83 @@ class TaskResult(ResultNode):
     """
 
 
-def _hydrate(value: Any, schema: Any, context: IContext, root: dict, path: tuple[str, ...]) -> Any:
+class SyncResultNode(ResultNode):
+    """A result node whose loaders block instead of being awaited.
+
+    What :class:`~evo.compute.engine.SyncComputeClient` hands back, so a result reads the
+    same way the call that produced it did::
+
+        result = client.geostatistics.kriging.run(...)
+        grid = result.target.load()
+        frame = result.target.attribute.to_dataframe()
+
+    Nothing else changes: the payload, the schema and the hydration are the async node's.
+    """
+
+    @classmethod
+    def _node_type(cls) -> type[ResultNode]:
+        return SyncResultNode
+
+    def load(self) -> BaseObject | AnyTypedAttribute:  # type: ignore[override]
+        """Load whatever this node refers to, blocking until it arrives.
+
+        :return: The typed object for an ``output: geoscience-object`` node, or the typed
+            attribute for an ``output: attribute`` one.
+        """
+        return run_sync(ResultNode.load(self))
+
+    def to_dataframe(self, *keys: str) -> pd.DataFrame:  # type: ignore[override]
+        """Load what this node refers to and read it into a DataFrame, blocking until done.
+
+        :param keys: Attributes to include, if the object's type accepts a selection. An
+            ``output: attribute`` node is a single column and takes none.
+        """
+        return run_sync(ResultNode.to_dataframe(self, *keys))
+
+
+class SyncTaskResult(SyncResultNode, TaskResult):
+    """What a task returned to :class:`~evo.compute.engine.SyncComputeClient`.
+
+    A :class:`TaskResult` in every respect except that :meth:`~SyncResultNode.load` and
+    :meth:`~SyncResultNode.to_dataframe` block, on this node and on every node below it.
+    """
+
+    @classmethod
+    def from_result(cls, result: TaskResult) -> SyncTaskResult:
+        """Mirror an awaited result, giving the whole tree blocking loaders.
+
+        :param result: The result the asynchronous engine produced.
+
+        :return: The same payload, hydrated again against the same schema.
+        """
+        return cls(result, result._schema, result._context)
+
+
+def _hydrate(
+    value: Any, schema: Any, context: IContext, root: dict, path: tuple[str, ...], node_type: type[ResultNode]
+) -> Any:
     """Wrap the objects inside ``value``, leaving scalars and nulls as they came."""
     if isinstance(value, dict):
-        return ResultNode(value, schema, context, root=root, path=path)
+        return node_type(value, schema, context, root=root, path=path)
     if isinstance(value, list):
         items = schema.get("items") if isinstance(schema, dict) else None
-        return [_hydrate(item, items, context, root, (*path, str(index))) for index, item in enumerate(value)]
+        return [
+            _hydrate(item, items, context, root, (*path, str(index)), node_type) for index, item in enumerate(value)
+        ]
     return value
 
 
-def _search(owner: BaseObject, expression: str) -> dict[str, Any] | None:
-    """The first attribute a JMESPath expression selects on an object, if it selects any."""
+def _search(owner: BaseObject, expression: str) -> Mapping[str, Any] | None:
+    """The first attribute a JMESPath expression selects on an object, if it selects any.
+
+    ``BaseObject.search`` hands back ``JMESPathArrayProxy`` / ``JMESPathObjectProxy``, which
+    are a ``Sequence`` and a ``Mapping`` but *not* a ``list`` and a ``dict``, so the abstract
+    types are the ones to test against.
+    """
     found = owner.search(expression)
-    if isinstance(found, list):
-        found = found[0] if found else None
-    return found if isinstance(found, dict) else None
+    if isinstance(found, Sequence) and not isinstance(found, (str, bytes)):
+        found = found[0] if len(found) else None
+    return found if isinstance(found, Mapping) else None
 
 
 def _healed(expression: str, containers: Any, schema: ObjectSchema) -> str:

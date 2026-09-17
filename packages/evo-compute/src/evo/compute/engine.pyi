@@ -16,7 +16,8 @@
 #
 # The runtime is always live, so tasks published after the snapshot still run --
 # they are simply not statically known until the snapshot is refreshed. Use
-# `ComputeClient.arun(topic, task, parameters)` to reach them.
+# `ComputeClient.arun(topic, task, parameters)`, or `SyncComputeClient.run(...)`,
+# to reach them.
 
 from typing import Any, Literal
 from uuid import UUID
@@ -26,10 +27,10 @@ from evo.objects import ObjectMetadata, ObjectReference
 from evo.objects.typed import BaseObject, DownloadedObject
 from typing_extensions import NotRequired, TypedDict
 
-from .outputs import ResultNode, TaskResult
+from .outputs import ResultNode, SyncResultNode, SyncTaskResult, TaskResult
 from .tasks.common.source_target import AnyTypedAttribute
 
-__all__ = ["ComputeClient"]
+__all__ = ["ComputeClient", "SyncComputeClient"]
 
 ObjectInput = str | UUID | BaseObject | DownloadedObject | ObjectMetadata | ObjectReference
 """Any handle reference resolution can derive a geoscience object URL from."""
@@ -475,6 +476,96 @@ class NormalScoreGcpResult(TaskResult):
     target: NormalScoreGcpResultTarget
     """The target object that was created or updated."""
 
+class SyncDeclusteringResultAttribute(SyncResultNode):
+    """Attribute containing the declustering weights."""
+
+    reference: str
+    """Reference to the attribute in the geoscience object."""
+    name: str
+    """The name of the output attribute."""
+
+class SyncDeclusteringResultTarget(SyncResultNode):
+    """The target that was created or updated with declustering weights."""
+
+    reference: str
+    """Reference to a geoscience object."""
+    name: str
+    """The name of the geoscience object."""
+    description: str | None
+    """The description of the geoscience object."""
+    schema_id: str
+    """The ID of the Geoscience Object schema."""
+    attribute: SyncDeclusteringResultAttribute
+    """Attribute containing the declustering weights."""
+
+class SyncDeclusteringResult(SyncTaskResult):
+    """Result of the declustering task."""
+
+    message: str
+    """A message that says what happened in the task."""
+    target: SyncDeclusteringResultTarget
+    """The target that was created or updated with declustering weights."""
+
+class SyncKrigingGcpResultAttribute(SyncResultNode):
+    """Attribute containing the kriging result."""
+
+    reference: str
+    """Reference to the attribute in the geoscience object."""
+    name: str
+    """The name of the output attribute."""
+
+class SyncKrigingGcpResultTarget(SyncResultNode):
+    """The target that was created or updated."""
+
+    reference: str
+    """Reference to a geoscience object."""
+    name: str
+    """The name of the geoscience object."""
+    description: str | None
+    """The description of the geoscience object."""
+    schema_id: str
+    """The ID of the Geoscience Object schema."""
+    attribute: SyncKrigingGcpResultAttribute
+    """Attribute containing the kriging result."""
+
+class SyncKrigingGcpResult(SyncTaskResult):
+    """Result of the kriging task."""
+
+    message: str
+    """A message that says what happened in the task."""
+    target: SyncKrigingGcpResultTarget
+    """The target that was created or updated."""
+
+class SyncNormalScoreGcpResultAttribute(SyncResultNode):
+    """Attribute containing the transformed values."""
+
+    reference: str
+    """Reference to the attribute in the geoscience object."""
+    name: str
+    """The name of the output attribute."""
+
+class SyncNormalScoreGcpResultTarget(SyncResultNode):
+    """The target object that was created or updated."""
+
+    reference: str
+    """Reference to a geoscience object."""
+    name: str
+    """The name of the geoscience object."""
+    description: str | None
+    """The description of the geoscience object."""
+    schema_id: str
+    """The ID of the Geoscience Object schema."""
+    attribute: SyncNormalScoreGcpResultAttribute
+    """Attribute containing the transformed values."""
+
+class SyncNormalScoreGcpResult(SyncTaskResult):
+    """Result of the normal-score transformation task."""
+
+    message: str
+    """A message describing what happened in the task."""
+    target: SyncNormalScoreGcpResultTarget
+    """The target object that was created or updated."""
+
 class _GeostatisticsDeclustering:
     """Computes grid-based declustering weights by measuring each sample's influence on evaluation locations. Supports both KNN (arithmetic mean) and IDW (inverse-distance weighted) modes via an optional power parameter."""
 
@@ -523,6 +614,54 @@ class _GeostatisticsNormalScoreGcp:
         """For more information, please read the <a href='/docs/guides/geostatistics-tasks/tasks/normal-score'>guide</a>"""
         ...
 
+class _SyncGeostatisticsDeclustering:
+    """Computes grid-based declustering weights by measuring each sample's influence on evaluation locations. Supports both KNN (arithmetic mean) and IDW (inverse-distance weighted) modes via an optional power parameter."""
+
+    def run(
+        self,
+        *,
+        source: DeclusteringSource | ObjectInput,
+        grid: DeclusteringGrid | ObjectInput,
+        target: DeclusteringTarget | AnyTypedAttribute,
+        neighborhood: DeclusteringExtendedNeighborhood,
+        power: float | None = ...,
+        preview: bool = True,
+    ) -> SyncDeclusteringResult:
+        """Computes grid-based declustering weights by measuring each sample's influence on evaluation locations. Supports both KNN (arithmetic mean) and IDW (inverse-distance weighted) modes via an optional power parameter."""
+        ...
+
+class _SyncGeostatisticsKrigingGcp:
+    """For more information, please read the <a href='/docs/guides/geostatistics-tasks/tasks/kriging'>guide</a>"""
+
+    def run(
+        self,
+        *,
+        source: KrigingGcpSource | AnyTypedAttribute,
+        target: KrigingGcpTarget | AnyTypedAttribute,
+        kriging_method: KrigingGcpSimpleKriging | KrigingGcpOrdinaryKriging,
+        variogram: ObjectInput,
+        neighborhood: KrigingGcpNeighborhoodWithOutlierRestrictions,
+        block_discretisation: KrigingGcpBlockDiscretization | None = ...,
+        preview: bool = True,
+    ) -> SyncKrigingGcpResult:
+        """For more information, please read the <a href='/docs/guides/geostatistics-tasks/tasks/kriging'>guide</a>"""
+        ...
+
+class _SyncGeostatisticsNormalScoreGcp:
+    """For more information, please read the <a href='/docs/guides/geostatistics-tasks/tasks/normal-score'>guide</a>"""
+
+    def run(
+        self,
+        *,
+        method: Literal["forward", "backward"],
+        source: NormalScoreGcpSource | AnyTypedAttribute,
+        distribution: ObjectInput,
+        target: NormalScoreGcpTarget | AnyTypedAttribute,
+        preview: bool = True,
+    ) -> SyncNormalScoreGcpResult:
+        """For more information, please read the <a href='/docs/guides/geostatistics-tasks/tasks/normal-score'>guide</a>"""
+        ...
+
 class _GeostatisticsTasks:
     """Tasks published under the ``geostatistics`` topic."""
 
@@ -530,13 +669,22 @@ class _GeostatisticsTasks:
     kriging_gcp: _GeostatisticsKrigingGcp
     normal_score_gcp: _GeostatisticsNormalScoreGcp
 
+class _SyncGeostatisticsTasks:
+    """Tasks published under the ``geostatistics`` topic."""
+
+    declustering: _SyncGeostatisticsDeclustering
+    kriging_gcp: _SyncGeostatisticsKrigingGcp
+    normal_score_gcp: _SyncGeostatisticsNormalScoreGcp
+
 class ComputeClient:
     """
-    Instance-bound async entry point to the compute task catalogue.
+    Instance-bound asynchronous entry point to the compute task catalogue.
 
     The topic and task attributes below come from a point-in-time snapshot of the
     discovery catalogue. The runtime resolves them live, so a task missing from this
     stub still runs -- reach it with :meth:`arun`.
+
+    See :class:`SyncComputeClient` for the same catalogue through the other entry point.
     """
 
     def __init__(
@@ -563,3 +711,39 @@ class ComputeClient:
     def __dir__(self) -> list[str]: ...
     def __repr__(self) -> str: ...
     geostatistics: _GeostatisticsTasks
+
+class SyncComputeClient:
+    """
+    Instance-bound blocking entry point to the compute task catalogue.
+
+    The topic and task attributes below come from a point-in-time snapshot of the
+    discovery catalogue. The runtime resolves them live, so a task missing from this
+    stub still runs -- reach it with :meth:`run`.
+
+    See :class:`ComputeClient` for the same catalogue through the other entry point.
+    """
+
+    def __init__(
+        self,
+        context: IContext,
+        *,
+        cache_ttl_seconds: float = ...,
+        validate: bool = ...,
+        deep_validation: bool = ...,
+        check_schemas: bool | None = ...,
+    ) -> None: ...
+    def run(
+        self,
+        topic: str,
+        task: str,
+        parameters: dict[str, Any],
+        *,
+        validate: bool | None = ...,
+        deep_validation: bool | None = ...,
+        check_schemas: bool | None = ...,
+    ) -> SyncTaskResult:
+        """Run any task by name, including one this stub does not know about."""
+        ...
+    def __dir__(self) -> list[str]: ...
+    def __repr__(self) -> str: ...
+    geostatistics: _SyncGeostatisticsTasks
