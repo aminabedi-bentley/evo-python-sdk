@@ -51,7 +51,7 @@ async def declustering(context: IContext) -> None:
 
 async def normal_score(context: IContext) -> None:
     client = ComputeClient(context)
-    await client.geostatistics.normal_score_gcp.run(
+    await client.geostatistics.normal_score.run(
         method="forward",
         source={
             "object": "https://example.com/objects/samples",
@@ -86,7 +86,7 @@ async def a_topic_the_snapshot_has_never_seen(context: IContext) -> None:
 
 def a_topic_the_snapshot_has_never_seen_without_await(context: IContext) -> None:
     client = SyncComputeClient(context)
-    client.converter.obj_import.run(file="...")
+    client.geology.some_task.run(anything=1)
 
 
 async def typed_handles(context: IContext, pointset: BaseObject, weights: PendingAttribute) -> None:

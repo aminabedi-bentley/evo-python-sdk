@@ -113,6 +113,28 @@ class TestComputeClient(ComputeClientTestCase):
             await self.client.geostatistics.normal_score_gcp.run(distribution=SOURCE_URL)
         self.assertEqual("normal-score-gcp", submit.await_args.kwargs["task"])
 
+    async def test_hyphenated_topic_names_are_reachable_with_underscores(self) -> None:
+        """``vis_service`` resolves to the platform's ``vis-service``.
+
+        Topics need the same treatment as tasks: the catalogue publishes several hyphenated
+        ones and no attribute access can spell them otherwise.
+        """
+        with self.catalogue_response(), self.mock_job_client() as submit:
+            await self.client.vis_service.tiling.run(object_url=SOURCE_URL, s2s_user_info="{}")
+        self.assertEqual("vis-service", submit.await_args.kwargs["topic"])
+
+    async def test_a_hyphenated_parameter_reaches_the_wire_with_its_published_name(self) -> None:
+        """``s2s_user_info`` is how it is typed; ``s2s-user-info`` is what is sent.
+
+        No keyword can spell the published name, so the engine normalises it like everything
+        else and puts the platform's own spelling back on the payload.
+        """
+        with self.catalogue_response(), self.mock_job_client() as submit:
+            await self.client.vis_service.tiling.run(object_url=SOURCE_URL, s2s_user_info="{}")
+
+        parameters = submit.await_args.kwargs["parameters"]
+        self.assertEqual({"object_url": SOURCE_URL, "s2s-user-info": "{}"}, parameters)
+
     async def test_catalogue_is_cached_across_runs(self) -> None:
         """The catalogue is fetched once and reused for later runs (any task/topic)."""
         with self.catalogue_response(), self.mock_job_client():
