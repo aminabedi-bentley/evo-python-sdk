@@ -84,12 +84,43 @@ would declare a *second* `ComputeClient` that has nothing to do with
 was imported. Stubbing the module that defines the class keeps one type, and
 `evo/compute/__init__.py` re-exports it as it already does.
 
-**The stub does not declare `__getattr__`.** It could, and then every attribute would
-type-check — including typos. Leaving it out is what makes an unknown task a static error.
-The cost is that a task published after the snapshot is also an error, which is the
-deliberate trade: total runtime breadth, point-in-time static breadth.
-`ComputeClient.arun(topic, task, parameters)` is the typed escape hatch for anything the
-snapshot does not know about, and is declared in the stub for exactly that reason.
+**The stub declares `__getattr__`, so an unlisted task is untyped rather than forbidden.**
+The catalogue is live, scoped per organization, and moves between SDK releases, so a shipped
+artifact can never be all of it — a snapshot is always simultaneously too small and too
+specific to wherever it was captured. The design doc's division is *execution is live, hints
+are point-in-time*: a task added after the snapshot still **runs**, it just does not appear
+in autocomplete. Declaring `__getattr__` is what keeps that true. Without it the missing
+half of the catalogue becomes a wall of false type errors on correct code, which is the
+opposite of the criterion (`C7`, and `C1` catalog coverage) the stub exists to serve.
+
+The cost is that a misspelled *task name* is no longer a static error — it resolves to the
+generic proxy and fails at run time, when discovery cannot find it. Everything else the
+stub checks is unaffected: parameter names, scalar types, enum members and result shapes all
+still come from the generated types for any task in the snapshot. This also matches the rest
+of the SDK, where a task with no hand-written client falls back to `JobClient.submit` rather
+than being refused.
+
+**The snapshot is a curated investment, not a mirror.** Because nothing breaks when a task
+is absent, which tasks to snapshot is a cost/benefit choice rather than a correctness one:
+more tasks means more precise hints and a larger generated artifact. `manifest.json` records
+exactly what was taken and from where, and
+`tests/test_schema_conformance.py::test_the_snapshot_still_describes_tasks_the_catalogue_advertises`
+reports drift against a live catalogue when run with credentials.
+
+**An overridden task is not generated at all.** A task with a hand-written runner (see
+`evo/compute/overrides/`) does not meet its caller through the schema, so generating a
+schema-shaped `run` beside it would advertise arguments the override does not take. The stub
+imports the runner instead — `from .overrides.geostatistics.kriging import KrigingOverride as
+_GeostatisticsKriging` — and the checker reads the annotations that are already on it.
+Nothing is restated, so nothing can drift. The blocking mirror is the one exception: a
+`_Sync...` class is emitted for it, copying the runner's own `run` signature with the
+`async` removed, because that is exactly what `SyncComputeClient` does to it at run time.
+
+**Overrides are enumerated from the package, not from the snapshot.** An override is a
+decision made in code: it claims whatever the platform advertises under that name, so it has
+to be describable whether or not a snapshot mentions the task. Driving it from the catalogue
+meant a rename silently dropped the override out of the stub — which is precisely what
+happened when `kriging-gcp` became `kriging`.
 
 **Results are `TaskResult` / `ResultNode` subclasses, not `TypedDict`s.** The engine hydrates
 what the platform sends into nodes that are still dictionaries but additionally load what
@@ -138,7 +169,7 @@ The stub is one half of a contract the engine enforces at run time from the same
 
 | Mistake | Caught statically by | Caught at run time by |
 |---|---|---|
-| unknown topic or task | the stub (no `__getattr__`) | discovery lookup in `arun` |
+| unknown topic or task | *nothing — by design* | discovery lookup in `arun` |
 | unknown or missing parameter | the stub's `run(...)` signature | signature binding, then `validate_parameters` |
 | wrong scalar type, bad enum member, missing nested field | the stub's `TypedDict`s and `Literal`s | `validate_parameters(..., deep=True)` |
 | a reference nothing could resolve | the stub's `ObjectInput` / `AttributeInput` unions | `ReferenceResolver`, then `validate_parameters(..., deep=True)` |

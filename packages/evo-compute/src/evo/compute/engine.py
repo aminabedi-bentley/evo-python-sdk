@@ -33,11 +33,15 @@ a notebook cell. It wraps a :class:`ComputeClient` and blocks on the bridge in
 Discovery is performed the first time a task within a topic is ``run(...)``. The
 catalogue is then held by the underlying :class:`~evo.compute.discovery.DiscoveryClient`,
 so repeated runs are served from there until its cache expires.
+
+A task can opt out of the synthesised surface entirely -- see :mod:`evo.compute.overrides`.
+``arun`` always takes the generic path, whether or not the task has an override.
 """
 
 from __future__ import annotations
 
 import inspect
+import keyword
 from typing import Any, ClassVar, Literal, Optional, Union
 from uuid import UUID
 
@@ -49,6 +53,7 @@ from .discovery import DEFAULT_CACHE_TTL_SECONDS, DiscoveryClient
 from .endpoints.models import TaskResource
 from .exceptions import ParameterValidationError
 from .outputs import SyncTaskResult, TaskResult
+from .overrides import load_override
 from .resolution import ReferenceResolver
 from .validation import validate_parameters
 
@@ -69,7 +74,11 @@ _JSON_SCHEMA_TO_PYTHON: dict[str, type] = {
 
 
 def _normalise(name: str) -> str:
-    """Map a platform task name to a Python identifier (``normal-score`` -> ``normal_score``)."""
+    """Map a platform topic or task name to a Python identifier (``normal-score`` -> ``normal_score``).
+
+    Applied to topics as well as tasks: ``cpt-to-borehole`` is not reachable as an attribute
+    otherwise, and the wire still gets the platform's own spelling from the discovered spec.
+    """
     return name.replace("-", "_")
 
 
@@ -85,6 +94,29 @@ def _python_annotation(prop: dict[str, Any]) -> Any:
     return _JSON_SCHEMA_TO_PYTHON.get(json_type, Any)
 
 
+def _wire_names(spec: TaskResource) -> dict[str, str]:
+    """Map the keyword a caller types to the property name the platform published.
+
+    Parameters get the same treatment as topics and tasks: ``vis-service`` is reachable as
+    ``vis_service`` and its ``s2s-user-info`` parameter as ``s2s_user_info``, while the wire
+    keeps the platform's own spelling.
+
+    Empty when the schema cannot be expressed as keyword-only parameters at all -- because two
+    properties normalise onto one name, or one normalises onto a Python keyword. ``run`` then
+    takes ``**parameters`` and forwards the published names verbatim, which is what the stub
+    already promises for these tasks.
+    """
+    schema = spec.parameters or {}
+    properties: dict[str, Any] = schema.get("properties") or {}
+    required = list(schema.get("required") or [])
+    published = [*required, *(name for name in properties if name not in required)]
+
+    names = {_normalise(name): name for name in published}
+    if len(names) != len(published) or not all(name.isidentifier() and not keyword.iskeyword(name) for name in names):
+        return {}
+    return names
+
+
 def _signature_from_schema(spec: TaskResource, returns: type[TaskResult] = TaskResult) -> inspect.Signature:
     """Synthesise a keyword-only ``run(...)`` signature from a task's parameter schema.
 
@@ -97,29 +129,37 @@ def _signature_from_schema(spec: TaskResource, returns: type[TaskResult] = TaskR
     schema = spec.parameters or {}
     properties: dict[str, Any] = schema.get("properties", {})
     required = list(schema.get("required", []))
+    published = {wire: name for name, wire in _wire_names(spec).items()}
 
     parameters: list[inspect.Parameter] = []
-    for name in required:
-        parameters.append(
-            inspect.Parameter(
-                name, inspect.Parameter.KEYWORD_ONLY, annotation=_python_annotation(properties.get(name, {}))
+    if published:
+        for name in required:
+            parameters.append(
+                inspect.Parameter(
+                    published[name],
+                    inspect.Parameter.KEYWORD_ONLY,
+                    annotation=_python_annotation(properties.get(name, {})),
+                )
             )
-        )
-    for name, prop in properties.items():
-        if name in required:
-            continue
-        parameters.append(
-            inspect.Parameter(
-                name,
-                inspect.Parameter.KEYWORD_ONLY,
-                default=prop.get("default", None),
-                annotation=_python_annotation(prop),
+        for name, prop in properties.items():
+            if name in required:
+                continue
+            parameters.append(
+                inspect.Parameter(
+                    published[name],
+                    inspect.Parameter.KEYWORD_ONLY,
+                    default=prop.get("default", None),
+                    annotation=_python_annotation(prop),
+                )
             )
-        )
     # ``preview`` defaults to opting in for tasks gated behind a feature flag.
     parameters.append(
         inspect.Parameter("preview", inspect.Parameter.KEYWORD_ONLY, default=bool(spec.feature_flag), annotation=bool)
     )
+    if not published and properties:
+        # Nothing nameable to bind against, so take the published spellings as they come.
+        # Last, because ``inspect`` rejects any parameter after a var-keyword.
+        parameters.append(inspect.Parameter("parameters", inspect.Parameter.VAR_KEYWORD, annotation=Any))
     return inspect.Signature(parameters, return_annotation=returns)
 
 
@@ -174,10 +214,17 @@ class ComputeClient:
         return _TopicProxy(self, name)
 
     def __dir__(self) -> list[str]:
-        return sorted(set(super().__dir__()) | {resource.topic for resource in self._discovery.peek_tasks()})
+        return sorted(
+            set(super().__dir__()) | {_normalise(resource.topic) for resource in self._discovery.peek_tasks()}
+        )
 
     def __repr__(self) -> str:
         return f"ComputeClient(org_id={str(self._org_id)!r})"
+
+    @property
+    def context(self) -> IContext:
+        """The context this client runs against, for overrides that build their own results."""
+        return self._context
 
     # -- non-blocking reads of the discovery cache -------------------------- #
 
@@ -185,7 +232,7 @@ class ComputeClient:
         """Return an already-discovered spec, or ``None`` while the catalogue is unfetched or stale."""
         normalised = _normalise(task)
         for resource in self._discovery.peek_tasks():
-            if resource.topic == topic and _normalise(resource.name) == normalised:
+            if _normalise(resource.topic) == _normalise(topic) and _normalise(resource.name) == normalised:
                 return resource
         return None
 
@@ -221,8 +268,15 @@ class ComputeClient:
 
         # Forward only what the caller actually passed, so unset optionals fall back to the
         # platform's own defaults while an explicit ``None`` still reaches the wire.
-        wire_parameters = dict(bound.arguments)
-        preview = bool(wire_parameters.pop("preview", signature.parameters["preview"].default))
+        arguments = dict(bound.arguments)
+        preview = bool(arguments.pop("preview", signature.parameters["preview"].default))
+        # Back to the platform's own spelling, which is all the wire has ever known.
+        published = _wire_names(spec)
+        wire_parameters = (
+            {published[name]: value for name, value in arguments.items()}
+            if published
+            else dict(arguments.pop("parameters", {}))
+        )
 
         if validate is None:
             validate = self._validate
@@ -259,7 +313,16 @@ class ComputeClient:
         it once and serves it from there until its TTL expires.
         """
         normalised = _normalise(task)
+        normalised_topic = _normalise(topic)
         topic_tasks = await self._discovery.get_topic_tasks(topic)
+        if not topic_tasks:
+            # `vis-service` is not spellable as an attribute, so `vis_service` has to find it.
+            # Same cached catalogue either way: this costs a scan, not a request.
+            topic_tasks = [
+                resource
+                for resource in await self._discovery.list_tasks()
+                if _normalise(resource.topic) == normalised_topic
+            ]
         for resource in topic_tasks:
             if _normalise(resource.name) == normalised:
                 return resource
@@ -288,6 +351,36 @@ class ComputeClient:
         run.__qualname__ = f"{_normalise(task)}.run"
         _describe_from_schema(run, self, topic, task)
         return run
+
+    def _bind_override(self, override: Any, topic: str, task: str) -> Any:
+        """Hand a task to its override. The runner awaits, as every other call here does."""
+        return override.bind(self, topic, task)
+
+
+class _BlockingRunner:
+    """A hand-written runner with its ``run`` blocked, for :class:`SyncComputeClient`.
+
+    An override answers with its own runner, which awaits like everything else in the engine.
+    Only the call itself is wrapped: what it returns is the override's own typed result, whose
+    members stay awaitable on both paths. :func:`~evo.compute.run_sync` is there for those.
+    """
+
+    def __init__(self, runner: Any) -> None:
+        self._runner = runner
+
+    def run(self, **parameters: Any) -> Any:
+        return run_sync(self._runner.run(**parameters))
+
+    def __getattr__(self, name: str) -> Any:
+        if name.startswith("_"):
+            raise AttributeError(name)
+        return getattr(self._runner, name)
+
+    def __dir__(self) -> list[str]:
+        return sorted(set(super().__dir__()) | set(dir(self._runner)))
+
+    def __repr__(self) -> str:
+        return repr(self._runner)
 
 
 class SyncComputeClient:
@@ -341,7 +434,9 @@ class SyncComputeClient:
         return _TopicProxy(self, name)
 
     def __dir__(self) -> list[str]:
-        return sorted(set(super().__dir__()) | {resource.topic for resource in self._discovery.peek_tasks()})
+        return sorted(
+            set(super().__dir__()) | {_normalise(resource.topic) for resource in self._discovery.peek_tasks()}
+        )
 
     def __repr__(self) -> str:
         return f"SyncComputeClient(org_id={str(self._async._org_id)!r})"
@@ -407,6 +502,10 @@ class SyncComputeClient:
         _describe_from_schema(run, self, topic, task)
         return run
 
+    def _bind_override(self, override: Any, topic: str, task: str) -> _BlockingRunner:
+        """Hand a task to its override, bound to the engine underneath and blocked on the bridge."""
+        return _BlockingRunner(override.bind(self._async, topic, task))
+
 
 class _TopicProxy:
     """A single topic within the catalogue; resolves attribute access to task proxies."""
@@ -415,9 +514,12 @@ class _TopicProxy:
         self._client = client
         self._topic = topic
 
-    def __getattr__(self, name: str) -> _TaskProxy:
+    def __getattr__(self, name: str) -> Any:
         if name.startswith("_"):
             raise AttributeError(name)
+        # A task with an override is handed to it whole; the rest stay generic.
+        if (override := load_override(self._topic, _normalise(name))) is not None:
+            return self._client._bind_override(override, self._topic, name)
         return _TaskProxy(self._client, self._topic, name)
 
     def __dir__(self) -> list[str]:
@@ -426,7 +528,7 @@ class _TopicProxy:
             | {
                 _normalise(resource.name)
                 for resource in self._client._discovery.peek_tasks()
-                if resource.topic == self._topic
+                if _normalise(resource.topic) == _normalise(self._topic)
             }
         )
 
