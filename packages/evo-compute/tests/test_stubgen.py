@@ -131,6 +131,26 @@ class TestGeneratedArtifact(unittest.TestCase):
         self.assertIn("-> _override_GeostatisticsKriging.KrigingResult", source)
         self.assertNotIn("SyncGeostatisticsKrigingResult", source)
 
+    def test_imported_generic_submission_preserves_typed_results(self) -> None:
+        source = _stubgen.generate_artifacts()[_stubgen.DEFAULT_OUTPUT.parent / "_facade_types.pyi"]
+        tree = ast.parse(source)
+        generic = next(
+            node
+            for node in tree.body
+            if isinstance(node, ast.ClassDef) and node.name == "_GeostatisticsNormalScoreHandle"
+        )
+        methods = [node for node in generic.body if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))]
+        submits = [node for node in methods if node.name in ("submit", "asubmit")]
+        self.assertEqual(4, len(submits))
+        for method in submits:
+            annotation = ast.unparse(method.returns)
+            self.assertIn("GeostatisticsNormalScoreResult", annotation)
+            self.assertIn("_jobs.SyncTaskJob[" if method.name == "submit" else "_jobs.TaskJob[", annotation)
+        bespoke = next(
+            node for node in tree.body if isinstance(node, ast.ClassDef) and node.name == "_GeostatisticsKrigingHandle"
+        )
+        self.assertFalse(any(getattr(node, "name", "") in ("submit", "asubmit") for node in bespoke.body))
+
     def test_generation_and_check_work_without_a_utf8_locale(self) -> None:
         script = "\n".join(
             [

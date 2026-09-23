@@ -6,11 +6,14 @@ import threading
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from importlib.resources import files
-from typing import Any, Generic, TypeVar, cast
+from typing import TYPE_CHECKING, Any, Generic, TypeVar, cast
 from uuid import UUID
 
 from evo.common import APIConnector, IContext
 from pydantic import BaseModel
+
+if TYPE_CHECKING:
+    from .jobs import SyncTaskJob, TaskJob
 
 _CLIENTS_ATTRIBUTE = "_evo_compute_task_clients"
 _Run = TypeVar("_Run")
@@ -179,3 +182,43 @@ class TaskHandle(Generic[_Run, _Arun]):
         runner = getattr(getattr(client, self.topic), self.task.replace("-", "_"))
         payload = _parameters(parameters, named, preview, native=getattr(runner, "params_type", None) is not None)
         return cast(_Arun, await runner.run(**payload))
+
+    def submit(
+        self,
+        context: IContext,
+        parameters: Mapping[str, Any] | BaseModel | None = None,
+        /,
+        *,
+        preview: bool | None = None,
+        **named: Any,
+    ) -> SyncTaskJob[Any]:
+        """Submit without waiting when the selected runner supports job submission."""
+        client = _client_for(context, blocking=True)
+        runner = getattr(getattr(client, self.topic), self.task.replace("-", "_"))
+        payload = _parameters(parameters, named, preview, native=getattr(runner, "params_type", None) is not None)
+        submit = getattr(runner, "submit", None)
+        if submit is None:
+            raise NotImplementedError(
+                f"{self.topic}.{self.task} has a bespoke runner without submit(); use run() or arun()"
+            )
+        return submit(**payload)
+
+    async def asubmit(
+        self,
+        context: IContext,
+        parameters: Mapping[str, Any] | BaseModel | None = None,
+        /,
+        *,
+        preview: bool | None = None,
+        **named: Any,
+    ) -> TaskJob[Any]:
+        """Submit on the caller's loop without waiting for task results."""
+        client = _client_for(context, blocking=False)
+        runner = getattr(getattr(client, self.topic), self.task.replace("-", "_"))
+        payload = _parameters(parameters, named, preview, native=getattr(runner, "params_type", None) is not None)
+        submit = getattr(runner, "submit", None)
+        if submit is None:
+            raise NotImplementedError(
+                f"{self.topic}.{self.task} has a bespoke runner without submit(); use run() or arun()"
+            )
+        return await submit(**payload)

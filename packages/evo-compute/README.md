@@ -97,6 +97,29 @@ its object and dataframe without `await`, keeping the handwritten result API unc
 Existing lowercase task-module imports and the legacy `await tasks.run(manager, parameters)`
 API are unchanged. Unique task names are also importable from `evo.compute.tasks`.
 
+Generic tasks can also return a job immediately:
+
+```python
+from evo.compute.tasks import NormalScore
+
+job = NormalScore.submit(manager, normal_score_parameters)
+print(job.id, job.url, job.status())
+result = job.results()
+```
+
+`await NormalScore.asubmit(async_manager, normal_score_parameters)` returns the asynchronous
+`TaskJob`; `.submit()` returns `SyncTaskJob`. Their existing status, cancellation, result
+loaders, polling and retry contracts are preserved. Feedback can be supplied to
+`job.results(fb=feedback)` (or its awaited equivalent). Blocking result waits report progress
+from the bridge thread; poll `job.status()` when updates need to stay on the caller's thread.
+The context-owned facade clients use the usual silent feedback default; explicitly constructed
+clients still support client-wide feedback.
+
+Bespoke runners remain run-only unless they implement submission themselves. In particular,
+`Kriging` exposes typed `.run()` and `.arun()`, not `.submit()` or `.asubmit()`. A submission
+attempt raises `NotImplementedError` rather than skipping its bespoke checks. Advanced callers
+can explicitly choose the generic by-name client API when that different contract is intended.
+
 For tasks missing from the shipped import index, or names shared by multiple topics, use the
 live-discovery escape hatch:
 

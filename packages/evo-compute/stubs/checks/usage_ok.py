@@ -16,6 +16,7 @@ let ``tests/test_stubgen.py`` do it when the checker is installed.
 """
 
 from evo.common import IContext
+from evo.common.utils import NoFeedback
 from evo.objects.typed import Attribute, BaseObject, PendingAttribute
 from typing_extensions import assert_type
 
@@ -62,6 +63,16 @@ async def neighborhood_objects_async(context: IContext) -> None:
         power=2.5,
     )
     await imported.target.attribute.to_dataframe()
+    job = await Declustering.asubmit(
+        context,
+        source="https://example.com/objects/samples",
+        grid="https://example.com/objects/grid",
+        target={"object": "https://example.com/objects/target", "attribute": "weights"},
+        neighborhood=_model_neighborhood(),
+        power=2.5,
+    )
+    submitted = await job.results()
+    await submitted.target.attribute.to_dataframe()
 
 
 def neighborhood_objects_blocking(context: IContext) -> None:
@@ -83,6 +94,16 @@ def neighborhood_objects_blocking(context: IContext) -> None:
         power=2.5,
     )
     imported.target.attribute.to_dataframe()
+    job = Declustering.submit(
+        context,
+        source="https://example.com/objects/samples",
+        grid="https://example.com/objects/grid",
+        target={"object": "https://example.com/objects/target", "attribute": "weights"},
+        neighborhood=_model_neighborhood(),
+        power=2.5,
+    )
+    submitted = job.results()
+    submitted.target.attribute.to_dataframe()
 
 
 async def declustering(context: IContext) -> None:
@@ -131,6 +152,56 @@ async def not_in_the_snapshot(context: IContext) -> None:
     client = ComputeClient(context)
     result: dict = await client.arun("geostatistics", "some-new-task", {"source": "..."})
     print(result)
+
+
+async def submitted_without_waiting(context: IContext) -> None:
+    """``submit`` takes the same parameters as ``run`` and hands back the job instead.
+
+    Everything the platform knows about a running job is reached through that handle, and
+    the results come from it in the end -- typed exactly as ``run`` would have returned them.
+    """
+    client = ComputeClient(context, fb=NoFeedback)
+    job = await client.geostatistics.declustering.submit(
+        source={"object": "https://example.com/objects/samples"},
+        grid={"object": "https://example.com/objects/grid"},
+        target={
+            "object": "https://example.com/objects/samples",
+            "attribute": {"operation": "create", "name": "declustering_weight"},
+        },
+        neighborhood=_model_neighborhood(),
+        power=2.0,
+    )
+    print(job.id, job.url)
+    status = await job.status()
+    print(status.status, status.progress)
+    result = await job.results(fb=NoFeedback)
+    await result.target.load()
+
+
+def submitted_without_waiting_or_await(context: IContext) -> None:
+    """The same handle through the blocking client, with the ``await`` removed throughout."""
+    client = SyncComputeClient(context, fb=NoFeedback)
+    job = client.geostatistics.declustering.submit(
+        source={"object": "https://example.com/objects/samples"},
+        grid={"object": "https://example.com/objects/grid"},
+        target={
+            "object": "https://example.com/objects/samples",
+            "attribute": {"operation": "create", "name": "declustering_weight"},
+        },
+        neighborhood=_model_neighborhood(),
+        power=2.0,
+    )
+    print(job.status().message)
+    job.cancel()
+    result = job.results()
+    result.target.load()
+
+
+async def submitted_by_name(context: IContext) -> None:
+    """``asubmit`` is to ``submit`` what ``arun`` is to ``run``: the untyped escape hatch."""
+    client = ComputeClient(context)
+    job = await client.asubmit("geostatistics", "some-new-task", {"source": "..."})
+    await job.cancel()
 
 
 async def a_topic_the_snapshot_has_never_seen(context: IContext) -> None:
@@ -301,3 +372,41 @@ async def imported_bespoke_arguments(context: IContext, grade: Attribute, kriged
     assert_type(result, KrigingResult)
     print(result.target_name, result.attribute_name)
     await result.get_target_object()
+
+
+def imported_task_submission(context: IContext) -> None:
+    job = NormalScore.submit(
+        context,
+        {
+            "method": "forward",
+            "source": {"object": "https://example.com/objects/samples", "attribute": "grade"},
+            "distribution": "https://example.com/objects/distribution",
+            "target": {
+                "object": "https://example.com/objects/samples",
+                "attribute": {"operation": "create", "name": "grade_ns"},
+            },
+        },
+    )
+    print(job.id, job.url, job.status())
+    result = job.results()
+    assert_type(result.target.attribute.name, str)
+    result.target.load()
+    job.cancel()
+
+
+async def imported_task_async_submission(context: IContext) -> None:
+    job = await NormalScore.asubmit(
+        context,
+        method="forward",
+        source={"object": "https://example.com/objects/samples", "attribute": "grade"},
+        distribution="https://example.com/objects/distribution",
+        target={
+            "object": "https://example.com/objects/samples",
+            "attribute": {"operation": "create", "name": "grade_ns"},
+        },
+    )
+    print(job.id, await job.status())
+    result = await job.results()
+    assert_type(result.target.attribute.name, str)
+    await result.target.load()
+    await job.cancel()
