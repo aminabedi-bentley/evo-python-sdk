@@ -77,6 +77,10 @@ _SCRATCH_TOPIC = re.compile(r"^test(-|$)")
 
 _LINE_LENGTH = 120
 
+# One line rather than the task's own description: ``submit`` is rendered for every task, so
+# repeating the description here would say the same thing a third time in every signature.
+_SUBMIT_SUMMARY = "Submit the task without waiting for it, and hand back the job."
+
 _JSON_SCALAR_TO_PYTHON = {
     "string": "str",
     "integer": "int",
@@ -579,6 +583,7 @@ def _render_fallbacks(blocking: bool) -> list[str]:
     snapshot has not seen into a static error. Naming one is never wrong; it is only untyped.
     """
     prefix = "Sync" if blocking else ""
+    awaited = "" if blocking else "async "
     return [
         "\n".join(
             [
@@ -588,8 +593,8 @@ def _render_fallbacks(blocking: bool) -> list[str]:
                     "    ",
                 ),
                 "",
-                f"    {'' if blocking else 'async '}def run("
-                f"self, **parameters: Any) -> {'SyncTaskResult' if blocking else 'TaskResult'}: ...",
+                f"    {awaited}def run(self, **parameters: Any) -> {prefix}TaskResult: ...",
+                f"    {awaited}def submit(self, **parameters: Any) -> {prefix}TaskJob[{prefix}TaskResult]: ...",
             ]
         ),
         "\n".join(
@@ -611,6 +616,19 @@ def _render_client(topics: list[str], blocking: bool = False) -> list[str]:
     entry = "blocking" if blocking else "asynchronous"
     other = "ComputeClient" if blocking else "SyncComputeClient"
     method = "run" if blocking else "arun"
+    submit = "submit" if blocking else "asubmit"
+    awaited = "" if blocking else "async "
+    prefix = "Sync" if blocking else ""
+    by_name = [
+        "        self,",
+        "        topic: str,",
+        "        task: str,",
+        "        parameters: dict[str, Any],",
+        "        *,",
+        "        validate: bool | None = ...,",
+        "        deep_validation: bool | None = ...,",
+        "        check_schemas: bool | None = ...,",
+    ]
     lines = [
         f"class {name}:",
         _docstring(
@@ -630,29 +648,29 @@ def _render_client(topics: list[str], blocking: bool = False) -> list[str]:
         "        validate: bool = ...,",
         "        deep_validation: bool = ...,",
         "        check_schemas: bool | None = ...,",
+        "        fb: IFeedback = ...,",
         "    ) -> None: ...",
-        f"    {'' if blocking else 'async '}def {method}(",
-        "        self,",
-        "        topic: str,",
-        "        task: str,",
-        "        parameters: dict[str, Any],",
-        "        *,",
-        "        validate: bool | None = ...,",
-        "        deep_validation: bool | None = ...,",
-        "        check_schemas: bool | None = ...,",
-        f"    ) -> {'SyncTaskResult' if blocking else 'TaskResult'}:",
+        f"    {awaited}def {method}(",
+        *by_name,
+        f"    ) -> {prefix}TaskResult:",
         _docstring(
             "Run any task by name, including one this stub does not know about.",
+            "        ",
+        ),
+        "        ...",
+        f"    {awaited}def {submit}(",
+        *by_name,
+        f"    ) -> {prefix}TaskJob[{prefix}TaskResult]:",
+        _docstring(
+            "Submit any task by name without waiting for it, and hand back the job.",
             "        ",
         ),
         "        ...",
         "    def __dir__(self) -> list[str]: ...",
         "    def __repr__(self) -> str: ...",
     ]
-    lines.extend(
-        f"    {_identifier_name(topic)}: _{'Sync' if blocking else ''}{_camel(topic)}Tasks" for topic in sorted(topics)
-    )
-    lines.append(f"    def __getattr__(self, name: str) -> _{'Sync' if blocking else ''}UnknownTopic: ...")
+    lines.extend(f"    {_identifier_name(topic)}: _{prefix}{_camel(topic)}Tasks" for topic in sorted(topics))
+    lines.append(f"    def __getattr__(self, name: str) -> _{prefix}UnknownTopic: ...")
     return lines
 
 
@@ -768,19 +786,25 @@ def _render(tasks: list[TaskResource], snapshot_dir: Path) -> str:
         if stub.description:
             lines.append(_docstring(stub.description, "    "))
             lines.append("")
-        lines.append(f"    {'' if stub.blocking else 'async '}def run(")
-        lines.append("        self,")
-        if stub.run_parameters != ["**parameters: Any"]:
-            lines.append("        *,")
-        lines.extend(f"        {parameter}," for parameter in stub.run_parameters)
-        if stub.description:
-            # Repeated on the method as well as the class: editors read the class docstring
-            # when hovering the task, and the method docstring in signature help.
-            lines.append(f"    ) -> {stub.return_type}:")
-            lines.append(_docstring(stub.description, "        "))
-            lines.append("        ...")
-        else:
-            lines.append(f"    ) -> {stub.return_type}: ...")
+        # ``run`` waits, ``submit`` hands back the job -- same parameters, so the same
+        # rendering with only the return type and the summary swapped.
+        for method, return_type, summary in (
+            ("run", stub.return_type, stub.description),
+            ("submit", f"{'SyncTaskJob' if stub.blocking else 'TaskJob'}[{stub.return_type}]", _SUBMIT_SUMMARY),
+        ):
+            lines.append(f"    {'' if stub.blocking else 'async '}def {method}(")
+            lines.append("        self,")
+            if stub.run_parameters != ["**parameters: Any"]:
+                lines.append("        *,")
+            lines.extend(f"        {parameter}," for parameter in stub.run_parameters)
+            if summary:
+                # Repeated on the method as well as the class: editors read the class docstring
+                # when hovering the task, and the method docstring in signature help.
+                lines.append(f"    ) -> {return_type}:")
+                lines.append(_docstring(summary, "        "))
+                lines.append("        ...")
+            else:
+                lines.append(f"    ) -> {return_type}: ...")
         blocks.append("\n".join(lines))
 
     blocks.extend(override_blocks)
@@ -819,17 +843,20 @@ def _render(tasks: list[TaskResource], snapshot_dir: Path) -> str:
     ]
     extensions = [name for name in ("NotRequired", "TypedDict") if name in body]
     outputs = [name for name in ("ResultNode", "SyncResultNode", "SyncTaskResult", "TaskResult") if name in body]
+    jobs = [name for name in ("SyncTaskJob", "TaskJob") if name in body]
     imports = [
         f"from typing import {', '.join(typing_names)}",
         *(["from uuid import UUID"] if "ObjectInput" in used else []),
         "",
         "from evo.common import IContext",
+        "from evo.common.interfaces import IFeedback",
         *(["from evo.objects import ObjectMetadata, ObjectReference"] if "ObjectInput" in used else []),
         *(["from evo.objects.typed import BaseObject, DownloadedObject"] if "ObjectInput" in used else []),
         *([f"from typing_extensions import {', '.join(extensions)}"] if extensions else []),
         "",
         *sorted(
             [
+                *([f"from .jobs import {', '.join(jobs)}"] if jobs else []),
                 *([f"from .outputs import {', '.join(outputs)}"] if outputs else []),
                 *(
                     ["from .tasks.common.source_target import AnyTypedAttribute"]
