@@ -28,6 +28,7 @@ EXPECTED_ERRORS = [
     "method",  # value outside the schema's enum
     "upper_case",  # result attribute used as something other than the type it declares
     "NotANeighborhood",
+    "target",
 ]
 
 
@@ -59,6 +60,23 @@ async def malformed_neighborhood_dictionary(context: IContext) -> None:
             "max_samples": "invalid",
         },
     )
+
+
+async def unrelated_neighborhood_model_submit(context: IContext) -> None:
+    client = ComputeClient(context)
+    await client.geostatistics.declustering.submit(
+        source="https://example.com/objects/samples",
+        grid="https://example.com/objects/grid",
+        target={"object": "https://example.com/objects/target", "attribute": "weights"},
+        neighborhood=NotANeighborhood(value="invalid"),
+    )
+
+
+async def unawaited_job_results(context: IContext) -> None:
+    client = ComputeClient(context)
+    job = await client.geology.some_task.submit(anything=1)
+    result = job.results()
+    print(result.target)
 
 
 async def missing_required_parameter(context: IContext) -> None:
