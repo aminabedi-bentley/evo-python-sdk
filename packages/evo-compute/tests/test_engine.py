@@ -22,7 +22,7 @@ from evo.common.test_tools import ORG as TEST_ORG
 from evo.common.test_tools import TestWithConnector
 
 from data import load_test_data
-from evo.compute import ComputeClient, ParameterValidationError
+from evo.compute import ComputeClient, JobClient, ParameterValidationError
 
 
 def _object_url(suffix: str) -> str:
@@ -77,9 +77,14 @@ class ComputeClientTestCase(TestWithConnector):
 
     @contextmanager
     def mock_job_client(self, results: dict | None = None) -> Iterator[mock.AsyncMock]:
-        """Patch JobClient.submit so tests exercise the engine, not the job lifecycle."""
-        job = mock.Mock()
-        job.wait_for_results = mock.AsyncMock(return_value={"ok": True} if results is None else results)
+        """Patch JobClient.submit so tests exercise the engine, not the job lifecycle.
+
+        Autospecced, so a lifecycle call the engine makes on the handle is awaitable exactly
+        where the real one is, and a method or argument ``JobClient`` does not have fails
+        here rather than passing against a mock that accepts anything.
+        """
+        job = mock.create_autospec(JobClient, instance=True)
+        job.wait_for_results.return_value = {"ok": True} if results is None else results
         submit = mock.AsyncMock(return_value=job)
         with mock.patch("evo.compute.engine.JobClient") as mock_job_client:
             mock_job_client.submit = submit

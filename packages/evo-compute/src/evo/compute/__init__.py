@@ -17,6 +17,7 @@ from .discovery import DiscoveryClient
 from .endpoints.models import TaskResource
 from .engine import ComputeClient, SyncComputeClient
 from .exceptions import ParameterValidationError, SyncBridgeError
+from .jobs import SyncTaskJob, TaskJob
 from .outputs import ResultNode, SyncResultNode, SyncTaskResult, TaskResult
 from .resolution import ReferenceResolver
 
@@ -32,7 +33,9 @@ __all__ = [
     "SyncBridgeError",
     "SyncComputeClient",
     "SyncResultNode",
+    "SyncTaskJob",
     "SyncTaskResult",
+    "TaskJob",
     "TaskResource",
     "TaskResult",
     "run_sync",

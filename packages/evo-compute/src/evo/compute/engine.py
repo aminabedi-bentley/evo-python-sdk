@@ -34,8 +34,16 @@ Discovery is performed the first time a task within a topic is ``run(...)``. The
 catalogue is then held by the underlying :class:`~evo.compute.discovery.DiscoveryClient`,
 so repeated runs are served from there until its cache expires.
 
+``run(...)`` waits for the task to finish. ``submit(...)`` does not: it hands back the
+:class:`~evo.compute.jobs.TaskJob` the run would otherwise have waited on, which is what
+progress reporting, cancellation and fanning out are all reached through. ``run`` is
+defined as ``submit`` followed by :meth:`~evo.compute.jobs.TaskJob.results`, so neither
+path can drift from the other.
+
 A task can opt out of the synthesised surface entirely -- see :mod:`evo.compute.overrides`.
-``arun`` always takes the generic path, whether or not the task has an override.
+``arun`` and ``asubmit`` always take the generic path, whether or not the task has an
+override; an override publishes whatever surface it chooses, and the one in the tree today
+publishes ``run`` alone.
 """
 
 from __future__ import annotations
@@ -46,12 +54,15 @@ from typing import Any, ClassVar, Literal, Optional, Union
 from uuid import UUID
 
 from evo.common import APIConnector, IContext
+from evo.common.interfaces import IFeedback
+from evo.common.utils import NoFeedback
 
 from ._sync import run_sync
 from .client import JobClient
 from .discovery import DEFAULT_CACHE_TTL_SECONDS, DiscoveryClient
 from .endpoints.models import TaskResource
 from .exceptions import ParameterValidationError
+from .jobs import SyncTaskJob, TaskJob
 from .outputs import SyncTaskResult, TaskResult
 from .overrides import load_override
 from .resolution import ReferenceResolver
@@ -117,16 +128,14 @@ def _wire_names(spec: TaskResource) -> dict[str, str]:
     return names
 
 
-def _signature_from_schema(
-    spec: TaskResource, returns: type[TaskResult | SyncTaskResult] = TaskResult
-) -> inspect.Signature:
+def _signature_from_schema(spec: TaskResource, returns: type = TaskResult) -> inspect.Signature:
     """Synthesise a keyword-only ``run(...)`` signature from a task's parameter schema.
 
     Required parameters come first, then optional ones (defaulting to their schema
     default or ``None``), then the engine's own ``preview`` flag.
 
-    :param returns: The result class the call hands back, which differs between the
-        awaited and the blocking client.
+    :param returns: What the call hands back: a result class for ``run``, a job class for
+        ``submit``, each differing again between the awaited and the blocking client.
     """
     schema = spec.parameters or {}
     properties: dict[str, Any] = schema.get("properties", {})
@@ -185,9 +194,15 @@ class ComputeClient:
         while this loads each referenced object's metadata. Pass ``False`` to keep
         validation but skip the requests, or ``True`` alongside ``validate=False`` to keep
         the guard that catches an object the task cannot read.
+    :param fb: Where every job this client submits reports its progress while it is waited
+        on. Set here rather than per call because the namespace forwards its keywords to
+        the task's own schema, so there is nowhere in ``run(...)`` for an engine-level
+        argument to live that would not also take a name away from every task.
+        :meth:`~evo.compute.jobs.TaskJob.results` overrides it for one wait.
     """
 
     _result_type: ClassVar[type[TaskResult]] = TaskResult
+    _job_type: ClassVar[type[TaskJob]] = TaskJob
 
     def __init__(
         self,
@@ -197,6 +212,7 @@ class ComputeClient:
         validate: bool = True,
         deep_validation: bool = False,
         check_schemas: bool | None = None,
+        fb: IFeedback = NoFeedback,
     ) -> None:
         self._context = context
         self._org_id: UUID = context.get_org_id()
@@ -206,6 +222,7 @@ class ComputeClient:
         self._validate = validate
         self._deep_validation = deep_validation
         self._check_schemas = check_schemas
+        self._fb = fb
 
     # -- dynamic namespace ------------------------------------------------- #
 
@@ -250,7 +267,11 @@ class ComputeClient:
         deep_validation: bool | None = None,
         check_schemas: bool | None = None,
     ) -> TaskResult:
-        """Discover the task (cached), resolve and validate the parameters, submit, and hydrate the results.
+        """Submit the task and wait for it, hydrating the results it returned.
+
+        :meth:`asubmit` does the work; this waits on what it hands back, with the client's
+        own feedback and the default polling. Take the job instead when the wait itself
+        matters -- to report progress elsewhere, to poll, or to cancel.
 
         :param validate: Override the client's schema-validation setting for this call.
             ``False`` skips deep validation too, but never the signature binding that
@@ -260,13 +281,72 @@ class ComputeClient:
         :param check_schemas: Override the client's supported-schema setting for this call.
             Falls back to ``validate`` when neither is set.
         """
+        job = await self._submit(
+            topic,
+            task,
+            parameters,
+            "run",
+            validate=validate,
+            deep_validation=deep_validation,
+            check_schemas=check_schemas,
+        )
+        return await job.results()
+
+    async def asubmit(
+        self,
+        topic: str,
+        task: str,
+        parameters: dict[str, Any],
+        *,
+        validate: bool | None = None,
+        deep_validation: bool | None = None,
+        check_schemas: bool | None = None,
+    ) -> TaskJob[TaskResult]:
+        """Discover the task (cached), resolve and validate the parameters, and submit.
+
+        Everything :meth:`arun` does except the waiting, which is left to the caller
+        through the returned handle.
+
+        :param validate: Override the client's schema-validation setting for this call.
+            ``False`` skips deep validation too, but never the signature binding that
+            builds the payload.
+        :param deep_validation: Override the client's deep-validation setting for this call.
+            Only consulted when validation is enabled.
+        :param check_schemas: Override the client's supported-schema setting for this call.
+            Falls back to ``validate`` when neither is set.
+
+        :return: A handle on the accepted job, carrying the task's ``results`` schema so
+            the payload is hydrated the same way either path reaches it.
+        """
+        return await self._submit(
+            topic,
+            task,
+            parameters,
+            "submit",
+            validate=validate,
+            deep_validation=deep_validation,
+            check_schemas=check_schemas,
+        )
+
+    async def _submit(
+        self,
+        topic: str,
+        task: str,
+        parameters: dict[str, Any],
+        operation: str,
+        *,
+        validate: bool | None,
+        deep_validation: bool | None,
+        check_schemas: bool | None,
+    ) -> TaskJob[TaskResult]:
+        """The work :meth:`arun` and :meth:`asubmit` share; ``operation`` names the call in a binding error."""
         spec = await self._resolve_spec(topic, task)
         label = f"{topic}.{_normalise(task)}"
         signature = _signature_from_schema(spec)
         try:
             bound = signature.bind(**parameters)
         except TypeError as error:
-            raise ParameterValidationError(f"{label}.run(): {error}", task=label, errors=[str(error)]) from None
+            raise ParameterValidationError(f"{label}.{operation}(): {error}", task=label, errors=[str(error)]) from None
 
         # Forward only what the caller actually passed, so unset optionals fall back to the
         # platform's own defaults while an explicit ``None`` still reaches the wire.
@@ -306,7 +386,7 @@ class ComputeClient:
             result_type=dict,
             preview=preview,
         )
-        return TaskResult(await job.wait_for_results(), spec.results, self._context)
+        return TaskJob(job, spec.results, self._context, self._fb)
 
     async def _resolve_spec(self, topic: str, task: str) -> TaskResource:
         """Return the discovery spec for ``topic``/``task``.
@@ -347,12 +427,30 @@ class ComputeClient:
             finally:
                 # The first call populates the catalogue, so this callable can now describe itself.
                 # Safe to repeat: it recomputes the same shape, or picks up a newer spec after a refresh.
-                _describe_from_schema(run, self, topic, task)
+                _describe_from_schema(run, self, topic, task, self._result_type)
 
         run.__name__ = "run"
         run.__qualname__ = f"{_normalise(task)}.run"
-        _describe_from_schema(run, self, topic, task)
+        _describe_from_schema(run, self, topic, task, self._result_type)
         return run
+
+    def _make_submit(self, topic: str, task: str) -> Any:
+        """Build the awaitable ``submit`` callable for a task proxy.
+
+        The same parameters as ``run``, described from the same schema, differing only in
+        what comes back: the job rather than what it eventually produces.
+        """
+
+        async def submit(**parameters: Any) -> TaskJob[TaskResult]:
+            try:
+                return await self.asubmit(topic, task, parameters)
+            finally:
+                _describe_from_schema(submit, self, topic, task, self._job_type)
+
+        submit.__name__ = "submit"
+        submit.__qualname__ = f"{_normalise(task)}.submit"
+        _describe_from_schema(submit, self, topic, task, self._job_type)
+        return submit
 
     def _bind_override(self, override: Any, topic: str, task: str) -> Any:
         """Hand a task to its override. The runner awaits, as every other call here does."""
@@ -409,6 +507,7 @@ class SyncComputeClient:
     """
 
     _result_type: ClassVar[type[SyncTaskResult]] = SyncTaskResult
+    _job_type: ClassVar[type[SyncTaskJob]] = SyncTaskJob
 
     def __init__(
         self,
@@ -418,6 +517,7 @@ class SyncComputeClient:
         validate: bool = True,
         deep_validation: bool = False,
         check_schemas: bool | None = None,
+        fb: IFeedback = NoFeedback,
     ) -> None:
         self._async = ComputeClient(
             context,
@@ -425,6 +525,7 @@ class SyncComputeClient:
             validate=validate,
             deep_validation=deep_validation,
             check_schemas=check_schemas,
+            fb=fb,
         )
 
     # -- dynamic namespace ------------------------------------------------- #
@@ -466,25 +567,78 @@ class SyncComputeClient:
     ) -> SyncTaskResult:
         """Run a task by name and block until it finishes.
 
-        The blocking counterpart of :meth:`ComputeClient.arun`, which does the work; see
-        there for what the overrides mean.
+        The blocking counterpart of :meth:`ComputeClient.arun`, and defined the same way:
+        :meth:`submit`, then wait on what it hands back.
 
         :return: The task's results, with blocking loaders.
 
         :raises SyncBridgeError: If called from inside the bridge's own event loop, or if
             the context belongs to a different one.
         """
-        result = run_sync(
-            self._async.arun(
-                topic,
-                task,
-                parameters,
-                validate=validate,
-                deep_validation=deep_validation,
-                check_schemas=check_schemas,
+        job = self._submit(
+            topic,
+            task,
+            parameters,
+            "run",
+            validate=validate,
+            deep_validation=deep_validation,
+            check_schemas=check_schemas,
+        )
+        return job.results()
+
+    def submit(
+        self,
+        topic: str,
+        task: str,
+        parameters: dict[str, Any],
+        *,
+        validate: bool | None = None,
+        deep_validation: bool | None = None,
+        check_schemas: bool | None = None,
+    ) -> SyncTaskJob[SyncTaskResult]:
+        """Submit a task by name without waiting for it.
+
+        The blocking counterpart of :meth:`ComputeClient.asubmit`, which does the work.
+
+        :return: A handle on the accepted job, whose lifecycle calls block in turn.
+
+        :raises SyncBridgeError: If called from inside the bridge's own event loop, or if
+            the context belongs to a different one.
+        """
+        return self._submit(
+            topic,
+            task,
+            parameters,
+            "submit",
+            validate=validate,
+            deep_validation=deep_validation,
+            check_schemas=check_schemas,
+        )
+
+    def _submit(
+        self,
+        topic: str,
+        task: str,
+        parameters: dict[str, Any],
+        operation: str,
+        *,
+        validate: bool | None,
+        deep_validation: bool | None,
+        check_schemas: bool | None,
+    ) -> SyncTaskJob[SyncTaskResult]:
+        return SyncTaskJob.from_job(
+            run_sync(
+                self._async._submit(
+                    topic,
+                    task,
+                    parameters,
+                    operation,
+                    validate=validate,
+                    deep_validation=deep_validation,
+                    check_schemas=check_schemas,
+                )
             )
         )
-        return SyncTaskResult.from_result(result)
 
     def _make_run(self, topic: str, task: str) -> Any:
         """Build the blocking ``run`` callable for a task proxy.
@@ -497,12 +651,26 @@ class SyncComputeClient:
             try:
                 return self.run(topic, task, parameters)
             finally:
-                _describe_from_schema(run, self, topic, task)
+                _describe_from_schema(run, self, topic, task, self._result_type)
 
         run.__name__ = "run"
         run.__qualname__ = f"{_normalise(task)}.run"
-        _describe_from_schema(run, self, topic, task)
+        _describe_from_schema(run, self, topic, task, self._result_type)
         return run
+
+    def _make_submit(self, topic: str, task: str) -> Any:
+        """Build the blocking ``submit`` callable for a task proxy."""
+
+        def submit(**parameters: Any) -> SyncTaskJob[SyncTaskResult]:
+            try:
+                return self.submit(topic, task, parameters)
+            finally:
+                _describe_from_schema(submit, self, topic, task, self._job_type)
+
+        submit.__name__ = "submit"
+        submit.__qualname__ = f"{_normalise(task)}.submit"
+        _describe_from_schema(submit, self, topic, task, self._job_type)
+        return submit
 
     def _bind_override(self, override: Any, topic: str, task: str) -> _BlockingRunner:
         """Hand a task to its override, bound to the engine underneath and blocked on the bridge."""
@@ -539,23 +707,26 @@ class _TopicProxy:
 
 
 class _TaskProxy:
-    """A single task; exposes a schema-shaped ``run(...)``, awaitable or blocking."""
+    """A single task; exposes a schema-shaped ``run(...)`` and ``submit(...)``, awaitable or blocking."""
 
     def __init__(self, client: ComputeClient | SyncComputeClient, topic: str, task: str) -> None:
         self._client = client
         self._topic = topic
         self._task = task
         self.run = client._make_run(topic, task)
+        self.submit = client._make_submit(topic, task)
 
     def __dir__(self) -> list[str]:
-        return sorted(set(super().__dir__()) | {"run"})
+        return sorted(set(super().__dir__()) | {"run", "submit"})
 
     def __repr__(self) -> str:
         return f"<compute task {self._topic!r}.{_normalise(self._task)!r}>"
 
 
-def _describe_from_schema(run: Any, client: ComputeClient | SyncComputeClient, topic: str, task: str) -> None:
-    """Shape ``run``'s signature and docstring from the task schema, if it has been discovered."""
+def _describe_from_schema(
+    call: Any, client: ComputeClient | SyncComputeClient, topic: str, task: str, returns: type
+) -> None:
+    """Shape ``call``'s signature and docstring from the task schema, if it has been discovered."""
     if (spec := client._peek_spec(topic, task)) is not None:
-        run.__signature__ = _signature_from_schema(spec, client._result_type)
-        run.__doc__ = spec.description or run.__doc__
+        call.__signature__ = _signature_from_schema(spec, returns)
+        call.__doc__ = spec.description or call.__doc__

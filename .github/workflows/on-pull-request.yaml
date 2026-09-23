@@ -22,5 +22,17 @@ jobs:
       - uses: actions/checkout@v6
       - uses: ./.github/actions/linting
 
+  check-stubs:
+    name: Check generated stubs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: ./.github/actions/install-uv
+      # Offline and deterministic: re-renders evo-compute's stub from the committed
+      # catalogue snapshot and fails if it differs from the one checked in.
+      - name: Check evo-compute stubs are up to date
+        shell: bash
+        run: make check-stubs-compute
+
   run-tests:
     uses: ./.github/workflows/run-all-tests.yaml

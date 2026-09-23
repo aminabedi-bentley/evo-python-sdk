@@ -16,6 +16,7 @@ let ``tests/test_stubgen.py`` do it when the checker is installed.
 """
 
 from evo.common import IContext
+from evo.common.utils import NoFeedback
 from evo.objects.typed import Attribute, BaseObject, PendingAttribute
 
 from evo.compute import ComputeClient, SyncComputeClient
@@ -70,6 +71,68 @@ async def not_in_the_snapshot(context: IContext) -> None:
     client = ComputeClient(context)
     result: dict = await client.arun("geostatistics", "some-new-task", {"source": "..."})
     print(result)
+
+
+async def submitted_without_waiting(context: IContext) -> None:
+    """``submit`` takes the same parameters as ``run`` and hands back the job instead.
+
+    Everything the platform knows about a running job is reached through that handle, and
+    the results come from it in the end -- typed exactly as ``run`` would have returned them.
+    """
+    client = ComputeClient(context, fb=NoFeedback)
+    job = await client.geostatistics.declustering.submit(
+        source={"object": "https://example.com/objects/samples"},
+        grid={"object": "https://example.com/objects/grid"},
+        target={
+            "object": "https://example.com/objects/samples",
+            "attribute": {"operation": "create", "name": "declustering_weight"},
+        },
+        neighborhood={
+            "ellipsoid": {
+                "ellipsoid_ranges": {"major": 100.0, "semi_major": 100.0, "minor": 50.0},
+                "rotation": {"dip_azimuth": 0.0, "dip": 0.0, "pitch": 0.0},
+            },
+            "max_samples": 20,
+        },
+        power=2.0,
+    )
+    print(job.id, job.url)
+    status = await job.status()
+    print(status.status, status.progress)
+    result = await job.results(fb=NoFeedback)
+    await result.target.load()
+
+
+def submitted_without_waiting_or_await(context: IContext) -> None:
+    """The same handle through the blocking client, with the ``await`` removed throughout."""
+    client = SyncComputeClient(context, fb=NoFeedback)
+    job = client.geostatistics.declustering.submit(
+        source={"object": "https://example.com/objects/samples"},
+        grid={"object": "https://example.com/objects/grid"},
+        target={
+            "object": "https://example.com/objects/samples",
+            "attribute": {"operation": "create", "name": "declustering_weight"},
+        },
+        neighborhood={
+            "ellipsoid": {
+                "ellipsoid_ranges": {"major": 100.0, "semi_major": 100.0, "minor": 50.0},
+                "rotation": {"dip_azimuth": 0.0, "dip": 0.0, "pitch": 0.0},
+            },
+            "max_samples": 20,
+        },
+        power=2.0,
+    )
+    print(job.status().message)
+    job.cancel()
+    result = job.results()
+    result.target.load()
+
+
+async def submitted_by_name(context: IContext) -> None:
+    """``asubmit`` is to ``submit`` what ``arun`` is to ``run``: the untyped escape hatch."""
+    client = ComputeClient(context)
+    job = await client.asubmit("geostatistics", "some-new-task", {"source": "..."})
+    await job.cancel()
 
 
 async def a_topic_the_snapshot_has_never_seen(context: IContext) -> None:

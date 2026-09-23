@@ -199,6 +199,38 @@ class TestTheSeam(OverrideTestCase):
                 )
         self.assertEqual("kriging", submit.await_args.kwargs["task"])
 
+    async def test_asubmit_always_takes_the_generic_path_too(self) -> None:
+        """The job handle is reached by name for an overridden task, exactly as ``arun`` is."""
+        with self.catalogue, _capture_submit("evo.compute.engine") as submit:
+            with self.assertRaises(_SubmitCaptured):
+                await self.client.asubmit(
+                    "geostatistics",
+                    "kriging",
+                    {
+                        "source": {"object": POINTSET_URL, "attribute": GRADE_ATTRIBUTE},
+                        "target": {"object": TARGET_URL, "attribute": {"operation": "create", "name": "grade"}},
+                        "variogram": VARIOGRAM_URL,
+                        "neighborhood": _search().model_dump(),
+                        "kriging_method": {"type": "ordinary"},
+                    },
+                )
+        self.assertEqual("kriging", submit.await_args.kwargs["task"])
+
+    def test_an_override_publishes_only_the_surface_it_wrote(self) -> None:
+        """A generic task offers ``run`` and ``submit``; an override offers what it defines.
+
+        The one in the tree defines ``run``, so ``kriging.submit`` is absent by design rather
+        than by omission -- its results are the runner's own type, which a generic handle has
+        no way to produce. ``asubmit`` above is the route to the job for these.
+        """
+        generic = self.client.geostatistics.declustering
+        self.assertTrue(hasattr(generic, "run"))
+        self.assertTrue(hasattr(generic, "submit"))
+
+        override = self.client.geostatistics.kriging
+        self.assertTrue(hasattr(override, "run"))
+        self.assertFalse(hasattr(override, "submit"))
+
 
 # --------------------------------------------------------------------------- #
 # What the override adds
