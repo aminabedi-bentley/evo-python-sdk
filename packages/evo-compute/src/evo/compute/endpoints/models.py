@@ -123,7 +123,7 @@ class TaskResource(BaseModel):
     """The topic the task belongs to (e.g. ``geostatistics``)."""
 
     name: StrictStr
-    """The task name within the topic (e.g. ``kriging-gcp``)."""
+    """The task name within the topic (e.g. ``normal-score``)."""
 
     key: StrictStr | None = None
     """A stable identifier for the task, if provided."""

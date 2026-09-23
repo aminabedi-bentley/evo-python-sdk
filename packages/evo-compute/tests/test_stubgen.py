@@ -33,7 +33,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from evo.compute import ComputeClient, ParameterValidationError, _stubgen
+from evo.compute import ComputeClient, ParameterValidationError, SyncComputeClient, _stubgen
 from evo.compute.endpoints.models import TaskResource
 from evo.compute.engine import _signature_from_schema
 from evo.compute.validation import validate_parameters
@@ -113,18 +113,50 @@ class TestGeneratedArtifact(unittest.TestCase):
                 self.assertEqual(list(_signature_from_schema(task).parameters), declared)
 
     def test_the_client_signatures_are_not_hand_maintained_into_drift(self) -> None:
-        """The task surface is generated, but ``ComputeClient``'s own methods are written out.
+        """The task surface is generated, but the clients' own methods are written out.
 
         Nothing else notices when the engine gains a keyword, so the stub silently stops
         describing the class it stands for -- which is how ``check_schemas`` went missing.
         """
-        rendered = "\n".join(_stubgen._render_client([]))
-        for method in (ComputeClient.__init__, ComputeClient.arun):
-            with self.subTest(method=method.__name__):
-                expected = [name for name in inspect.signature(method).parameters if name != "self"]
-                block = rendered.split(f"def {method.__name__}(")[1].split(") ->")[0]
-                declared = [line.strip().split(":")[0] for line in block.splitlines() if ":" in line]
-                self.assertEqual(expected, declared)
+        clients = (
+            (False, ComputeClient.__init__, ComputeClient.arun),
+            (True, SyncComputeClient.__init__, SyncComputeClient.run),
+        )
+        for blocking, *methods in clients:
+            rendered = "\n".join(_stubgen._render_client([], blocking=blocking))
+            for method in methods:
+                with self.subTest(blocking=blocking, method=method.__name__):
+                    expected = [name for name in inspect.signature(method).parameters if name != "self"]
+                    block = rendered.split(f"def {method.__name__}(")[1].split(") ->")[0]
+                    declared = [line.strip().split(":")[0] for line in block.splitlines() if ":" in line]
+                    self.assertEqual(expected, declared)
+
+    def test_the_blocking_mirror_is_generated_for_every_task(self) -> None:
+        """``SyncComputeClient`` is only worth stubbing if it reaches the same tasks."""
+        stub = _stubgen.DEFAULT_OUTPUT.read_text()
+        for task in _stubgen.load_snapshot(_stubgen.DEFAULT_SNAPSHOT_DIR):
+            name = f"_Sync{_stubgen._camel(task.topic)}{_stubgen._camel(task.name)}"
+            with self.subTest(task=f"{task.topic}.{task.name}"):
+                self.assertIn(f"class {name}:", stub)
+                block = stub.split(f"class {name}:")[1].split("\n\nclass ")[0]
+                self.assertIn("    def run(", block)
+                self.assertNotIn("    async def run(", block)
+
+    def test_the_two_surfaces_take_the_same_parameters(self) -> None:
+        """Only the results differ between the mirrors; the parameter types are shared."""
+        for task in _stubgen.load_snapshot(_stubgen.DEFAULT_SNAPSHOT_DIR):
+            with self.subTest(task=f"{task.topic}.{task.name}"):
+                awaited = _stubgen._TaskRenderer(task).render()
+                blocking = _stubgen._TaskRenderer(task, blocking=True).render(awaited.run_parameters)
+                self.assertEqual(awaited.run_parameters, blocking.run_parameters)
+                self.assertEqual(f"Sync{awaited.return_type}", blocking.return_type)
+
+    def test_a_blocking_result_is_rooted_in_the_blocking_classes(self) -> None:
+        """Otherwise ``result.target.load()`` would still be declared as a coroutine."""
+        stub = _stubgen.DEFAULT_OUTPUT.read_text()
+        self.assertIn("class SyncDeclusteringResult(SyncTaskResult):", stub)
+        self.assertIn("class SyncDeclusteringResultTarget(SyncResultNode):", stub)
+        self.assertIn("    target: SyncDeclusteringResultTarget", stub)
 
 
 class TestAnnotations(unittest.TestCase):

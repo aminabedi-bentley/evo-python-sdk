@@ -18,7 +18,7 @@ than a pile of broken code.
 
 from evo.common import IContext
 
-from evo.compute import ComputeClient
+from evo.compute import ComputeClient, SyncComputeClient
 
 EXPECTED_ERRORS = [
     "geology",  # topic that is not in the catalogue snapshot
@@ -28,6 +28,7 @@ EXPECTED_ERRORS = [
     "power",  # wrong scalar type
     "method",  # value outside the schema's enum
     "upper_case",  # result attribute used as something other than the type it declares
+    "await",  # blocking client's result awaited as though it were the async one's
 ]
 
 
@@ -122,3 +123,18 @@ async def misused_result_attribute(context: IContext) -> None:
         },
     )
     print(result.target.attribute.name.upper_case())
+
+
+async def awaited_blocking_result(context: IContext) -> None:
+    """The blocking client has already done the waiting; there is nothing left to await."""
+    client = SyncComputeClient(context)
+    result = client.geostatistics.normal_score_gcp.run(
+        method="forward",
+        source={"object": "https://example.com/objects/samples", "attribute": "grade"},
+        distribution="https://example.com/objects/distribution",
+        target={
+            "object": "https://example.com/objects/samples",
+            "attribute": {"operation": "create", "name": "grade_ns"},
+        },
+    )
+    await result.target.load()

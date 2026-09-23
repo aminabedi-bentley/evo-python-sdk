@@ -73,7 +73,7 @@ annotation-conformance test fails if a schema uses any annotation outside this s
 flagging that the engine needs updating before the new task can be handled generically.
 
 ``composite`` names a sub-object the platform composes from several fields (the published
-``kriging-gcp`` schema tags ``source.filter`` and ``target.filter`` with ``composite:
+``kriging`` schema tags ``source.filter`` and ``target.filter`` with ``composite:
 filter``). It is descriptive only: the node it marks is an ordinary subschema that
 resolution and validation already walk, so the engine records the key as understood rather
 than reporting every discovery of a filtered task as vocabulary drift.
