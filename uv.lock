@@ -911,7 +911,7 @@ wheels = [
 
 [[package]]
 name = "evo-blockmodels"
-version = "0.6.0"
+version = "0.6.2"
 source = { editable = "packages/evo-blockmodels" }
 dependencies = [
     { name = "evo-sdk-common" },
@@ -1081,6 +1081,7 @@ test = [
     { name = "mypy" },
     { name = "parameterized" },
     { name = "pytest" },
+    { name = "ruff" },
 ]
 
 [package.metadata]
@@ -1106,12 +1107,14 @@ dev = [
     { name = "parameterized", specifier = "==0.9.0" },
     { name = "pytest" },
     { name = "ruff" },
+    { name = "ruff", specifier = "==0.15.16" },
 ]
 test = [
     { name = "evo-sdk-common", extras = ["aiohttp"], editable = "packages/evo-sdk-common" },
     { name = "mypy" },
     { name = "parameterized", specifier = "==0.9.0" },
     { name = "pytest" },
+    { name = "ruff", specifier = "==0.15.16" },
 ]
 
 [[package]]

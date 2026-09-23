@@ -29,21 +29,29 @@ The runtime stays fully generic: a task published after the snapshot still runs,
 just not statically known until the snapshot is refreshed. That is the deliberate trade —
 total runtime breadth, point-in-time static breadth. :meth:`ComputeClient.arun` is the
 typed escape hatch for anything the stub does not know about.
+
+A task with an override (see :mod:`evo.compute.overrides`) is the one case where the schema
+is *not* what the caller meets, so nothing is generated for it: the stub imports the runner
+and lets the checker read the annotations that are already on it.
 """
 
 from __future__ import annotations
 
 import argparse
 import ast
+import inspect
 import json
 import keyword
 import re
+import subprocess
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 from .endpoints.models import TaskResource
+from .engine import _wire_names
+from .overrides import load_override, overridden_tasks
 
 __all__ = [
     "capture_snapshot",
@@ -52,6 +60,8 @@ __all__ = [
 ]
 
 _PACKAGE_DIR = Path(__file__).resolve().parent
+
+_IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 DEFAULT_SNAPSHOT_DIR = _PACKAGE_DIR.parents[2] / "stubs" / "snapshot"
 """The catalogue snapshot checked into the repository, next to the package sources."""
 
@@ -59,6 +69,11 @@ DEFAULT_OUTPUT = _PACKAGE_DIR / "engine.pyi"
 """The generated stub, which shadows ``engine.py`` for type checkers."""
 
 _MANIFEST_NAME = "manifest.json"
+
+# Deployments accumulate throwaway topics -- `test-cbcfabfdabaf` and friends, one task each,
+# published by whoever was exercising the platform that day. Capturing them would ship someone's
+# scratch work as public typed API, so they are skipped and reported rather than silently kept.
+_SCRATCH_TOPIC = re.compile(r"^test(-|$)")
 
 _LINE_LENGTH = 120
 
@@ -150,10 +165,37 @@ def _member_tag(member: Any, index: int) -> str:
     return str(index)
 
 
+def _is_single_literal(annotation: str) -> bool:
+    """Whether ``annotation`` is one ``Literal[...]`` rather than a union containing one."""
+    try:
+        node = ast.parse(annotation, mode="eval").body
+    except SyntaxError:
+        return False
+    return isinstance(node, ast.Subscript) and isinstance(node.value, ast.Name) and node.value.id == "Literal"
+
+
+def _join_union(annotations: list[str]) -> str:
+    """``A | B``, with any ``Literal`` members folded into a single ``Literal[...]``.
+
+    A schema that spells its allowed values as sibling ``const`` branches would otherwise
+    render as ``Literal[200] | Literal[201] | ...``, which says the same thing less legibly
+    and cannot be line-split the way one ``Literal`` can.
+    """
+    values: list[str] = []
+    others: list[str] = []
+    for annotation in annotations:
+        if _is_single_literal(annotation):
+            values.append(annotation[len("Literal[") : -1])
+        else:
+            others.append(annotation)
+    folded = [f"Literal[{', '.join(dict.fromkeys(values))}]"] if values else []
+    return " | ".join([*folded, *others])
+
+
 def _declaration(name: str, annotation: str, indent: str) -> list[str]:
     """Declare ``name: annotation``, splitting an over-long ``Literal`` as the formatter would."""
     line = f"{indent}{name}: {annotation}"
-    if len(line) <= _LINE_LENGTH or not (annotation.startswith("Literal[") and annotation.endswith("]")):
+    if len(line) <= _LINE_LENGTH or not _is_single_literal(annotation):
         return [line]
     values = ast.literal_eval(f"[{annotation[len('Literal[') : -1]}]")
     return [f"{indent}{name}: Literal[", *(f"{indent}    {_literal(value)}," for value in values), f"{indent}]"]
@@ -199,8 +241,8 @@ class _TaskStub:
 class _TaskRenderer:
     """Renders the ``TypedDict`` tree for a single task's parameter and result schemas.
 
-    Every generated name is prefixed with the task, so two tasks never fight over a name.
-    Within a task, structurally identical objects collapse onto one type -- the published
+    Every generated name is prefixed with the topic and task, so two tasks never fight over a
+    name. Within a task, structurally identical objects collapse onto one type -- the published
     schemas inline the same shape repeatedly (a filter condition appears at four depths in
     the kriging schema), and one name per shape keeps the stub readable.
 
@@ -222,7 +264,9 @@ class _TaskRenderer:
     _by_pointer: dict[str, str] = field(default_factory=dict, init=False)
 
     def __post_init__(self) -> None:
-        self.prefix = f"{'Sync' if self.blocking else ''}{_camel(self.spec.name)}"
+        # Topic-scoped, not just task-scoped: `geotech` and `gtm` both publish `remesh`,
+        # `fill-holes` and a dozen more, and their shapes are not interchangeable.
+        self.prefix = f"{'Sync' if self.blocking else ''}{_camel(self.spec.topic)}{_camel(self.spec.name)}"
 
     # -- naming ------------------------------------------------------------ #
 
@@ -325,7 +369,7 @@ class _TaskRenderer:
             self._annotation(member, root, (*path, _member_tag(member, index)))
             for index, member in enumerate(members, 1)
         ]
-        return " | ".join(dict.fromkeys(annotations))
+        return _join_union(list(dict.fromkeys(annotations)))
 
     def _of_type(self, json_type: str, node: dict[str, Any], root: dict[str, Any], path: tuple[str, ...]) -> str:
         if json_type == "object":
@@ -409,15 +453,16 @@ class _TaskRenderer:
         properties: dict[str, Any] = schema.get("properties") or {}
         required = list(schema.get("required") or [])
         ordered = [*required, *(name for name in properties if name not in required)]
-        if not all(_identifier(name) for name in ordered):
-            # No keyword-only signature can express these; stay generic for this task.
+        published = {wire: name for name, wire in _wire_names(self.spec).items()}
+        if properties and not published:
+            # The engine could not name these either, and takes them through ``**parameters``.
             return ["**parameters: Any"]
 
         lines = []
         for name in ordered:
             annotation = self._annotation(properties.get(name, {}), schema, (name,))
             default = "" if name in required else " = ..."
-            lines.append(f"{name}: {annotation}{default}")
+            lines.append(f"{published[name]}: {annotation}{default}")
         lines.append(f"preview: bool = {bool(self.spec.feature_flag)!r}")
         return lines
 
@@ -476,10 +521,16 @@ def load_snapshot(snapshot_dir: Path) -> list[TaskResource]:
 
 
 def _snapshot_payload(task: TaskResource) -> dict[str, Any]:
-    """The contents of a snapshot file: the discovery payload, less what the path says."""
+    """The contents of a snapshot file: the discovery payload, less what the path says.
+
+    Deployment-specific fields go too. ``links`` carries the capturing deployment's hostname
+    and org id, and ``key`` its record id for the task -- none of which describe the task's
+    shape, and all of which would rewrite every file the next time someone captures from a
+    different org.
+    """
     payload = task.model_dump(mode="json", exclude_none=True)
-    payload.pop("topic", None)
-    payload.pop("name", None)
+    for implied_or_local in ("topic", "name", "key", "links"):
+        payload.pop(implied_or_local, None)
     return payload
 
 
@@ -519,7 +570,43 @@ def _header(snapshot_dir: Path) -> list[str]:
     ]
 
 
-def _render_client(stubs: list[_TaskStub], blocking: bool = False) -> list[str]:
+def _render_fallbacks(blocking: bool) -> list[str]:
+    """The classes an unlisted topic or task resolves to.
+
+    The catalogue is live, scoped per organization, and moves between SDK releases, so a
+    shipped stub can never be all of it. Declaring ``__getattr__`` keeps the design's
+    division -- execution is live, hints are point-in-time -- instead of turning a task this
+    snapshot has not seen into a static error. Naming one is never wrong; it is only untyped.
+    """
+    prefix = "Sync" if blocking else ""
+    return [
+        "\n".join(
+            [
+                f"class _{prefix}UnknownTask:",
+                _docstring(
+                    "A task this stub does not describe. It still runs, with generic arguments.",
+                    "    ",
+                ),
+                "",
+                f"    {'' if blocking else 'async '}def run("
+                f"self, **parameters: Any) -> {'SyncTaskResult' if blocking else 'TaskResult'}: ...",
+            ]
+        ),
+        "\n".join(
+            [
+                f"class _{prefix}UnknownTopic:",
+                _docstring(
+                    "A topic this stub does not describe. Its tasks still resolve at run time.",
+                    "    ",
+                ),
+                "",
+                f"    def __getattr__(self, name: str) -> _{prefix}UnknownTask: ...",
+            ]
+        ),
+    ]
+
+
+def _render_client(topics: list[str], blocking: bool = False) -> list[str]:
     name = "SyncComputeClient" if blocking else "ComputeClient"
     entry = "blocking" if blocking else "asynchronous"
     other = "ComputeClient" if blocking else "SyncComputeClient"
@@ -563,18 +650,114 @@ def _render_client(stubs: list[_TaskStub], blocking: bool = False) -> list[str]:
         "    def __repr__(self) -> str: ...",
     ]
     lines.extend(
-        f"    {topic}: _{'Sync' if blocking else ''}{_camel(topic)}Tasks"
-        for topic in sorted({stub.topic for stub in stubs})
+        f"    {_identifier_name(topic)}: _{'Sync' if blocking else ''}{_camel(topic)}Tasks" for topic in sorted(topics)
     )
+    lines.append(f"    def __getattr__(self, name: str) -> _{'Sync' if blocking else ''}UnknownTopic: ...")
     return lines
 
 
+def _override_runner(topic: str, task: str) -> tuple[str, str]:
+    """The module and class of the runner that owns ``topic``/``task``.
+
+    The runner class is whatever the module's ``bind`` is annotated to return. Under
+    ``from __future__ import annotations`` that annotation arrives as a string, which is the
+    name wanted here either way.
+    """
+    module = load_override(topic, task)
+    assert module is not None, "only called for a task an override claims"
+    annotation = inspect.signature(module.bind).return_annotation
+    return module.__name__.removeprefix("evo.compute"), getattr(annotation, "__name__", annotation)
+
+
+def _render_blocking_override(
+    topic: str, task: str, module_path: str, runner_name: str, class_name: str
+) -> tuple[list[str], str]:
+    """A blocking mirror of a hand-written runner, copied from that runner's own signature.
+
+    ``SyncComputeClient`` wraps an override so the call blocks, and the stub has to say so --
+    the runner's annotations are the only description of the task there is, since an
+    overridden task is never generated. The return type is left alone: what comes back is the
+    hand-written result, whose own members stay awaitable on both paths.
+
+    :return: The imports the copied annotations need, and the rendered class.
+    """
+    module = load_override(topic, task)
+    assert module is not None, "only called for a task an override claims"
+    runner = getattr(module, runner_name)
+    signature = inspect.signature(runner.run)
+
+    # Under ``from __future__ import annotations`` these arrive as source text, which is what
+    # the stub wants; whatever of it the override module defines has to be imported by name.
+    written = [str(parameter.annotation) for parameter in signature.parameters.values()] + [
+        str(signature.return_annotation)
+    ]
+    needed = sorted({name for text in written for name in _IDENTIFIER.findall(text) if hasattr(module, name)})
+    imports = [_import_from(module_path, needed)] if needed else []
+
+    lines = [f"class {class_name}:"]
+    if description := inspect.getdoc(runner):
+        lines.append(_docstring(description, "    "))
+        lines.append("")
+    lines.append("    def run(")
+    lines.append("        self,")
+    lines.append("        *,")
+    for name, parameter in signature.parameters.items():
+        if name == "self":
+            continue
+        default = " = ..." if parameter.default is not inspect.Parameter.empty else ""
+        lines.append(f"        {name}: {parameter.annotation}{default},")
+    lines.append(f"    ) -> {signature.return_annotation}: ...")
+    return imports, "\n".join(lines)
+
+
+def _identifier_name(name: str) -> str:
+    return name.replace("-", "_")
+
+
+def _import_from(module_path: str, names: list[str]) -> str:
+    """``from X import a, b``, wrapped the way the formatter would if it runs long."""
+    single = f"from {module_path} import {', '.join(names)}"
+    if len(single) <= _LINE_LENGTH:
+        return single
+    return "\n".join([f"from {module_path} import (", *(f"    {name}," for name in names), ")"])
+
+
 def _render(tasks: list[TaskResource], snapshot_dir: Path) -> str:
-    ordered = sorted(tasks, key=lambda task: (task.topic, task.name))
-    awaited = [_TaskRenderer(task).render() for task in ordered]
-    # The blocking mirror reuses the parameter types verbatim; only the results differ.
-    blocking = [_TaskRenderer(task, blocking=True).render(stub.run_parameters) for task, stub in zip(ordered, awaited)]
-    stubs = [*awaited, *blocking]
+    overridden = overridden_tasks()
+    claimed = set(overridden)
+
+    stubs: list[_TaskStub] = []
+    override_imports: list[str] = []
+    override_blocks: list[str] = []
+    members: dict[str, list[tuple[str, str]]] = {}
+    sync_members: dict[str, list[tuple[str, str]]] = {}
+
+    def remember(topic: str, attribute: str, class_name: str, sync_name: str) -> None:
+        members.setdefault(topic, []).append((attribute, class_name))
+        sync_members.setdefault(topic, []).append((attribute, sync_name))
+
+    for task in sorted(tasks, key=lambda task: (task.topic, task.name)):
+        attribute = _identifier_name(task.name)
+        if (task.topic, attribute) in claimed:
+            # The override describes it, whatever the snapshot happens to say.
+            continue
+        awaited = _TaskRenderer(task).render()
+        stubs.append(awaited)
+        # The blocking mirror reuses the parameter types verbatim; only the results differ.
+        stubs.append(_TaskRenderer(task, blocking=True).render(awaited.run_parameters))
+        remember(task.topic, attribute, awaited.class_name, f"_Sync{_camel(task.topic)}{_camel(task.name)}")
+
+    # Overrides come from the package, not the catalogue: a hand-written runner is a decision
+    # made in code, and the stub must describe it whether or not a snapshot mentions the task.
+    for topic, task_name in overridden:
+        class_name = f"_{_camel(topic)}{_camel(task_name)}"
+        sync_name = f"_Sync{_camel(topic)}{_camel(task_name)}"
+        module_path, runner_name = _override_runner(topic, task_name)
+        override_imports.append(f"from {module_path} import {runner_name} as {class_name}")
+        imports, block = _render_blocking_override(topic, task_name, module_path, runner_name, sync_name)
+        override_imports.extend(imports)
+        override_blocks.append(block)
+        remember(topic, task_name, class_name, sync_name)
 
     blocks: list[str] = []
     for stub in stubs:
@@ -600,19 +783,25 @@ def _render(tasks: list[TaskResource], snapshot_dir: Path) -> str:
             lines.append(f"    ) -> {stub.return_type}: ...")
         blocks.append("\n".join(lines))
 
-    for family in (awaited, blocking):
-        for topic in sorted({stub.topic for stub in family}):
-            in_topic = [stub for stub in family if stub.topic == topic]
+    blocks.extend(override_blocks)
+
+    for blocking in (False, True):
+        blocks.extend(_render_fallbacks(blocking))
+
+    for blocking, family in ((False, members), (True, sync_members)):
+        for topic, entries in sorted(family.items()):
+            entries = sorted(entries)
             lines = [
-                f"class {in_topic[0].topic_class}:",
+                f"class _{'Sync' if blocking else ''}{_camel(topic)}Tasks:",
                 _docstring(f"Tasks published under the ``{topic}`` topic.", "    "),
                 "",
             ]
-            lines.extend(f"    {stub.attribute}: {stub.class_name}" for stub in in_topic)
+            lines.extend(f"    {attribute}: {class_name}" for attribute, class_name in entries)
+            lines.append(f"    def __getattr__(self, name: str) -> _{'Sync' if blocking else ''}UnknownTask: ...")
             blocks.append("\n".join(lines))
 
-    blocks.append("\n".join(_render_client(awaited)))
-    blocks.append("\n".join(_render_client(blocking, blocking=True)))
+    blocks.append("\n".join(_render_client(sorted(members))))
+    blocks.append("\n".join(_render_client(sorted(sync_members), blocking=True)))
 
     body = "\n\n".join(blocks)
     used = {name: alias for name, alias in _REFERENCE_ALIASES.items() if re.search(rf"\b{name}\b", body)}
@@ -639,8 +828,17 @@ def _render(tasks: list[TaskResource], snapshot_dir: Path) -> str:
         *(["from evo.objects.typed import BaseObject, DownloadedObject"] if "ObjectInput" in used else []),
         *([f"from typing_extensions import {', '.join(extensions)}"] if extensions else []),
         "",
-        f"from .outputs import {', '.join(outputs)}",
-        *(["from .tasks.common.source_target import AnyTypedAttribute"] if "AnyTypedAttribute" in declared else []),
+        *sorted(
+            [
+                *([f"from .outputs import {', '.join(outputs)}"] if outputs else []),
+                *(
+                    ["from .tasks.common.source_target import AnyTypedAttribute"]
+                    if "AnyTypedAttribute" in declared
+                    else []
+                ),
+                *dict.fromkeys(override_imports),
+            ]
+        ),
     ]
     preamble = [
         *_header(snapshot_dir),
@@ -651,6 +849,30 @@ def _render(tasks: list[TaskResource], snapshot_dir: Path) -> str:
         *(aliases or [""]),
     ]
     return "\n".join(preamble) + "\n" + body + "\n"
+
+
+def _formatted(source: str, output: Path) -> str:
+    """Hand the rendered stub to ``ruff format`` rather than imitating it.
+
+    The generator used to emit formatter-ready text by construction, which held while the
+    snapshot was three hand-picked tasks and stopped holding the moment it was not: a long
+    ``Literal`` splits one way, an over-long union in a subscript another, an import a third.
+    Matching that by hand is a losing game, and a stub that is not format-stable fails CI for
+    a reason that has nothing to do with what it describes.
+
+    ``--stdin-filename`` matters: ``.pyi`` files are formatted differently from ``.py``.
+    """
+    try:
+        result = subprocess.run(
+            ["ruff", "format", "--stdin-filename", str(output), "-"],
+            input=source,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+    except FileNotFoundError:
+        raise RuntimeError("ruff is needed to generate the stub; install the 'test' dependency group") from None
+    return result.stdout
 
 
 def generate_stub(snapshot_dir: Path = DEFAULT_SNAPSHOT_DIR, output: Path = DEFAULT_OUTPUT) -> str:
@@ -664,7 +886,7 @@ def generate_stub(snapshot_dir: Path = DEFAULT_SNAPSHOT_DIR, output: Path = DEFA
     tasks = load_snapshot(snapshot_dir)
     if not tasks:
         raise FileNotFoundError(f"no task schemas found in {snapshot_dir}")
-    return _render(tasks, snapshot_dir)
+    return _formatted(_render(tasks, snapshot_dir), output)
 
 
 def capture_snapshot(snapshot_dir: Path = DEFAULT_SNAPSHOT_DIR) -> list[TaskResource]:
@@ -676,7 +898,8 @@ def capture_snapshot(snapshot_dir: Path = DEFAULT_SNAPSHOT_DIR) -> list[TaskReso
 
     :param snapshot_dir: The directory to write the snapshot to.
 
-    :return: The tasks written.
+    :return: The tasks written, which excludes any :data:`_SCRATCH_TOPIC` the deployment
+        happens to be carrying.
     """
     import asyncio
     import os
@@ -696,13 +919,23 @@ def capture_snapshot(snapshot_dir: Path = DEFAULT_SNAPSHOT_DIR) -> list[TaskReso
         async with connector:
             return await DiscoveryClient(connector, UUID(os.environ["EVO_ORG_ID"])).list_tasks()
 
-    tasks = sorted(asyncio.run(_fetch()), key=lambda task: (task.topic, task.name))
+    discovered = sorted(asyncio.run(_fetch()), key=lambda task: (task.topic, task.name))
+    tasks = [task for task in discovered if not _SCRATCH_TOPIC.match(task.topic)]
+    skipped = sorted({task.topic for task in discovered} - {task.topic for task in tasks})
+    if skipped:
+        print(f"skipped scratch topics: {', '.join(skipped)}")
+
     for stale in snapshot_dir.glob("*/*.json"):
         stale.unlink()
     for task in tasks:
         path = snapshot_dir / task.topic / f"{task.name}.json"
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(_snapshot_json(_snapshot_payload(task)))
+    for directory in snapshot_dir.iterdir():
+        # A topic the catalogue dropped leaves its directory behind, and `load_snapshot`
+        # would keep reading it as a topic with no tasks.
+        if directory.is_dir() and not any(directory.iterdir()):
+            directory.rmdir()
 
     manifest = {
         "source": "GET /compute/orgs/{org_id}/tasks?details=true",

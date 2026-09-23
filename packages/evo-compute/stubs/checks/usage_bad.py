@@ -21,8 +21,6 @@ from evo.common import IContext
 from evo.compute import ComputeClient, SyncComputeClient
 
 EXPECTED_ERRORS = [
-    "geology",  # topic that is not in the catalogue snapshot
-    "made_up_task",  # task that is not in the catalogue snapshot
     "neighborhood",  # required parameter omitted
     "sourse",  # misspelled parameter
     "power",  # wrong scalar type
@@ -30,16 +28,6 @@ EXPECTED_ERRORS = [
     "upper_case",  # result attribute used as something other than the type it declares
     "await",  # blocking client's result awaited as though it were the async one's
 ]
-
-
-async def unknown_topic(context: IContext) -> None:
-    client = ComputeClient(context)
-    await client.geology.declustering.run()
-
-
-async def unknown_task(context: IContext) -> None:
-    client = ComputeClient(context)
-    await client.geostatistics.made_up_task.run()
 
 
 async def missing_required_parameter(context: IContext) -> None:
@@ -95,7 +83,7 @@ async def wrong_scalar_type(context: IContext) -> None:
 
 async def value_outside_the_enum(context: IContext) -> None:
     client = ComputeClient(context)
-    await client.geostatistics.normal_score_gcp.run(
+    await client.geostatistics.normal_score.run(
         method="sideways",
         source={"object": "https://example.com/objects/samples", "attribute": "grade"},
         distribution="https://example.com/objects/distribution",
@@ -113,7 +101,7 @@ async def misused_result_attribute(context: IContext) -> None:
     their real types all the way down, which is what this checks.
     """
     client = ComputeClient(context)
-    result = await client.geostatistics.normal_score_gcp.run(
+    result = await client.geostatistics.normal_score.run(
         method="forward",
         source={"object": "https://example.com/objects/samples", "attribute": "grade"},
         distribution="https://example.com/objects/distribution",
@@ -128,7 +116,7 @@ async def misused_result_attribute(context: IContext) -> None:
 async def awaited_blocking_result(context: IContext) -> None:
     """The blocking client has already done the waiting; there is nothing left to await."""
     client = SyncComputeClient(context)
-    result = client.geostatistics.normal_score_gcp.run(
+    result = client.geostatistics.normal_score.run(
         method="forward",
         source={"object": "https://example.com/objects/samples", "attribute": "grade"},
         distribution="https://example.com/objects/distribution",
