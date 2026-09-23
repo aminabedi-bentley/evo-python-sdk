@@ -9,7 +9,7 @@
 #  See the License for the specific language governing permissions and
 #  limitations under the License.
 
-"""Discovery-driven generic compute engine (async).
+"""Discovery-driven generic compute engine.
 
 :class:`ComputeClient` is an instance-bound entry point to every compute task an
 organization can run. It synthesises a topic/task namespace on the fly and, when
@@ -17,7 +17,7 @@ a task is run, reads that task's schema from the live discovery catalogue to sha
 and submit the job::
 
     client = ComputeClient(context)
-    result = await client.geostatistics.kriging_gcp.run(source=..., target=..., ...)
+    result = await client.geostatistics.kriging.run(source=..., target=..., ...)
 
 A call is checked, resolved, checked again and submitted: required parameters first
 (before anything reaches the network), then :mod:`~evo.compute.resolution` turns the
@@ -25,6 +25,10 @@ caller's objects and attributes into the references the schema declares, then op
 deep validation runs on that resolved payload -- the form the platform actually receives.
 What comes back is hydrated against the task's ``results`` schema by
 :mod:`~evo.compute.outputs`, so the objects a task wrote can be loaded straight back.
+
+:class:`SyncComputeClient` is the same thing without the ``await``, for a plain script or
+a notebook cell. It wraps a :class:`ComputeClient` and blocks on the bridge in
+:mod:`evo.compute._sync`; which of the two you use is an explicit choice, not a mode.
 
 Discovery is performed the first time a task within a topic is ``run(...)``. The
 catalogue is then held by the underlying :class:`~evo.compute.discovery.DiscoveryClient`,
@@ -34,21 +38,23 @@ so repeated runs are served from there until its cache expires.
 from __future__ import annotations
 
 import inspect
-from typing import Any, Literal, Optional, Union
+from typing import Any, ClassVar, Literal, Optional, Union
 from uuid import UUID
 
 from evo.common import APIConnector, IContext
 
+from ._sync import run_sync
 from .client import JobClient
 from .discovery import DEFAULT_CACHE_TTL_SECONDS, DiscoveryClient
 from .endpoints.models import TaskResource
 from .exceptions import ParameterValidationError
-from .outputs import TaskResult
+from .outputs import SyncTaskResult, TaskResult
 from .resolution import ReferenceResolver
 from .validation import validate_parameters
 
 __all__ = [
     "ComputeClient",
+    "SyncComputeClient",
 ]
 
 
@@ -63,7 +69,7 @@ _JSON_SCHEMA_TO_PYTHON: dict[str, type] = {
 
 
 def _normalise(name: str) -> str:
-    """Map a platform task name to a Python identifier (``kriging-gcp`` -> ``kriging_gcp``)."""
+    """Map a platform task name to a Python identifier (``normal-score`` -> ``normal_score``)."""
     return name.replace("-", "_")
 
 
@@ -79,11 +85,16 @@ def _python_annotation(prop: dict[str, Any]) -> Any:
     return _JSON_SCHEMA_TO_PYTHON.get(json_type, Any)
 
 
-def _signature_from_schema(spec: TaskResource) -> inspect.Signature:
+def _signature_from_schema(
+    spec: TaskResource, returns: type[TaskResult | SyncTaskResult] = TaskResult
+) -> inspect.Signature:
     """Synthesise a keyword-only ``run(...)`` signature from a task's parameter schema.
 
     Required parameters come first, then optional ones (defaulting to their schema
     default or ``None``), then the engine's own ``preview`` flag.
+
+    :param returns: The result class the call hands back, which differs between the
+        awaited and the blocking client.
     """
     schema = spec.parameters or {}
     properties: dict[str, Any] = schema.get("properties", {})
@@ -111,7 +122,7 @@ def _signature_from_schema(spec: TaskResource) -> inspect.Signature:
     parameters.append(
         inspect.Parameter("preview", inspect.Parameter.KEYWORD_ONLY, default=bool(spec.feature_flag), annotation=bool)
     )
-    return inspect.Signature(parameters, return_annotation=TaskResult)
+    return inspect.Signature(parameters, return_annotation=returns)
 
 
 class ComputeClient:
@@ -135,6 +146,8 @@ class ComputeClient:
         validation but skip the requests, or ``True`` alongside ``validate=False`` to keep
         the guard that catches an object the task cannot read.
     """
+
+    _result_type: ClassVar[type[TaskResult]] = TaskResult
 
     def __init__(
         self,
@@ -256,11 +269,151 @@ class ComputeClient:
         available = ", ".join(sorted(_normalise(resource.name) for resource in topic_tasks)) or "(none)"
         raise AttributeError(f"no task {task!r} in topic {topic!r}. Available: {available}")
 
+    def _make_run(self, topic: str, task: str) -> Any:
+        """Build the awaitable ``run`` callable for a task proxy.
+
+        If the task's schema has already been discovered, the callable advertises a synthesised
+        signature for editor tab-completion. Otherwise it accepts generic keyword arguments and the
+        schema is fetched on first call, after which the callable re-describes itself. Either way
+        discovery is never triggered by attribute access alone.
+        """
+
+        async def run(**parameters: Any) -> TaskResult:
+            try:
+                return await self.arun(topic, task, parameters)
+            finally:
+                # The first call populates the catalogue, so this callable can now describe itself.
+                # Safe to repeat: it recomputes the same shape, or picks up a newer spec after a refresh.
+                _describe_from_schema(run, self, topic, task)
+
+        run.__name__ = "run"
+        run.__qualname__ = f"{_normalise(task)}.run"
+        _describe_from_schema(run, self, topic, task)
+        return run
+
+
+class SyncComputeClient:
+    """Blocking sibling of :class:`ComputeClient`, for scripts and notebooks.
+
+    The same catalogue, the same namespace, the same checks -- with the ``await`` removed::
+
+        client = SyncComputeClient(context)
+        result = client.geostatistics.kriging.run(source=..., target=..., ...)
+        grid = result.target.load()
+
+    It wraps a :class:`ComputeClient` and runs its coroutines on the bridge described in
+    :mod:`evo.compute._sync`, so nothing about validation, resolution or hydration differs
+    between the two paths. The results come back as :class:`~evo.compute.outputs.SyncTaskResult`,
+    whose loaders block in turn.
+
+    The context must be authenticated on the same bridge -- :func:`~evo.compute.run_sync`
+    around ``manager.login()`` rather than ``await`` -- because a connection is bound to the
+    event loop it was opened on. A context opened elsewhere raises
+    :class:`~evo.compute.exceptions.SyncBridgeError` saying so on the first call.
+
+    Not a context manager, consistent with :class:`ComputeClient`. The constructor takes the
+    same arguments and passes them straight through.
+    """
+
+    _result_type: ClassVar[type[SyncTaskResult]] = SyncTaskResult
+
+    def __init__(
+        self,
+        context: IContext,
+        *,
+        cache_ttl_seconds: float = DEFAULT_CACHE_TTL_SECONDS,
+        validate: bool = True,
+        deep_validation: bool = False,
+        check_schemas: bool | None = None,
+    ) -> None:
+        self._async = ComputeClient(
+            context,
+            cache_ttl_seconds=cache_ttl_seconds,
+            validate=validate,
+            deep_validation=deep_validation,
+            check_schemas=check_schemas,
+        )
+
+    # -- dynamic namespace ------------------------------------------------- #
+
+    def __getattr__(self, name: str) -> _TopicProxy:
+        # Only fires for names not found normally. Private/dunder probes must raise.
+        if name.startswith("_"):
+            raise AttributeError(name)
+        return _TopicProxy(self, name)
+
+    def __dir__(self) -> list[str]:
+        return sorted(set(super().__dir__()) | {resource.topic for resource in self._discovery.peek_tasks()})
+
+    def __repr__(self) -> str:
+        return f"SyncComputeClient(org_id={str(self._async._org_id)!r})"
+
+    # -- what the shared proxies read -------------------------------------- #
+
+    @property
+    def _discovery(self) -> DiscoveryClient:
+        return self._async._discovery
+
+    def _peek_spec(self, topic: str, task: str) -> TaskResource | None:
+        return self._async._peek_spec(topic, task)
+
+    # -- execution --------------------------------------------------------- #
+
+    def run(
+        self,
+        topic: str,
+        task: str,
+        parameters: dict[str, Any],
+        *,
+        validate: bool | None = None,
+        deep_validation: bool | None = None,
+        check_schemas: bool | None = None,
+    ) -> SyncTaskResult:
+        """Run a task by name and block until it finishes.
+
+        The blocking counterpart of :meth:`ComputeClient.arun`, which does the work; see
+        there for what the overrides mean.
+
+        :return: The task's results, with blocking loaders.
+
+        :raises SyncBridgeError: If called from inside the bridge's own event loop, or if
+            the context belongs to a different one.
+        """
+        result = run_sync(
+            self._async.arun(
+                topic,
+                task,
+                parameters,
+                validate=validate,
+                deep_validation=deep_validation,
+                check_schemas=check_schemas,
+            )
+        )
+        return SyncTaskResult.from_result(result)
+
+    def _make_run(self, topic: str, task: str) -> Any:
+        """Build the blocking ``run`` callable for a task proxy.
+
+        Described from the schema exactly as the awaited one is, so the two namespaces read
+        the same in an editor.
+        """
+
+        def run(**parameters: Any) -> SyncTaskResult:
+            try:
+                return self.run(topic, task, parameters)
+            finally:
+                _describe_from_schema(run, self, topic, task)
+
+        run.__name__ = "run"
+        run.__qualname__ = f"{_normalise(task)}.run"
+        _describe_from_schema(run, self, topic, task)
+        return run
+
 
 class _TopicProxy:
     """A single topic within the catalogue; resolves attribute access to task proxies."""
 
-    def __init__(self, client: ComputeClient, topic: str) -> None:
+    def __init__(self, client: ComputeClient | SyncComputeClient, topic: str) -> None:
         self._client = client
         self._topic = topic
 
@@ -284,13 +437,13 @@ class _TopicProxy:
 
 
 class _TaskProxy:
-    """A single task; exposes a schema-shaped async ``run(...)``."""
+    """A single task; exposes a schema-shaped ``run(...)``, awaitable or blocking."""
 
-    def __init__(self, client: ComputeClient, topic: str, task: str) -> None:
+    def __init__(self, client: ComputeClient | SyncComputeClient, topic: str, task: str) -> None:
         self._client = client
         self._topic = topic
         self._task = task
-        self.run = _make_run(client, topic, task)
+        self.run = client._make_run(topic, task)
 
     def __dir__(self) -> list[str]:
         return sorted(set(super().__dir__()) | {"run"})
@@ -299,31 +452,8 @@ class _TaskProxy:
         return f"<compute task {self._topic!r}.{_normalise(self._task)!r}>"
 
 
-def _make_run(client: ComputeClient, topic: str, task: str):
-    """Build the async ``run`` callable for a task proxy.
-
-    If the task's schema has already been discovered, the callable advertises a synthesised
-    signature for editor tab-completion. Otherwise it accepts generic keyword arguments and the
-    schema is fetched on first call, after which the callable re-describes itself. Either way
-    discovery is never triggered by attribute access alone.
-    """
-
-    async def run(**parameters: Any) -> TaskResult:
-        try:
-            return await client.arun(topic, task, parameters)
-        finally:
-            # The first call populates the catalogue, so this callable can now describe itself.
-            # Safe to repeat: it recomputes the same shape, or picks up a newer spec after a refresh.
-            _describe_from_schema(run, client, topic, task)
-
-    run.__name__ = "run"
-    run.__qualname__ = f"{_normalise(task)}.run"
-    _describe_from_schema(run, client, topic, task)
-    return run
-
-
-def _describe_from_schema(run: Any, client: ComputeClient, topic: str, task: str) -> None:
+def _describe_from_schema(run: Any, client: ComputeClient | SyncComputeClient, topic: str, task: str) -> None:
     """Shape ``run``'s signature and docstring from the task schema, if it has been discovered."""
     if (spec := client._peek_spec(topic, task)) is not None:
-        run.__signature__ = _signature_from_schema(spec)
+        run.__signature__ = _signature_from_schema(spec, client._result_type)
         run.__doc__ = spec.description or run.__doc__

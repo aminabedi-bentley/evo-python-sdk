@@ -16,7 +16,7 @@ A task's results are references too -- ``{"reference": "<url>", "name": ..., "sc
 task's published ``results`` schema marks each of those with an ``output`` annotation, which
 is all :class:`TaskResult` needs to hand the caller a loadable object instead of a URL::
 
-    result = await client.geostatistics.kriging_gcp.run(...)
+    result = await client.geostatistics.kriging.run(...)
     grid = await result.target.load()
     frame = await result.target.to_dataframe()
     estimates = await result.target.attribute.to_dataframe()
@@ -28,6 +28,10 @@ object family keeps attributes in. A task publishes one expression for every fam
 supports, so the container it names can be the wrong one for the object actually written --
 :meth:`ResultNode.load` repairs it from ``attribute_path`` rather than reporting a miss.
 
+:class:`SyncTaskResult` is the same tree with blocking loaders, which is what
+:class:`~evo.compute.engine.SyncComputeClient` returns. It is a sibling of :class:`TaskResult`
+rather than a subclass, because a loader that blocks cannot stand in for one that is awaited.
+
 :class:`TaskResult` and :class:`ResultNode` subclass :class:`dict`, so the raw payload is
 still available exactly as the platform sent it -- ``result["target"]["reference"]`` and
 ``result == {...}`` behave as they did before hydration existed. Attribute access and the
@@ -36,11 +40,14 @@ loaders are additions on top, driven entirely by the schema; nothing here is tas
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, Any
 
 from evo.common import IContext
 from evo.objects import ObjectSchema
 from evo.objects.typed import BaseObject, object_from_reference
+
+from ._sync import run_sync
 
 # ``attribute_path`` means the same thing on the way in and on the way out, so both sides
 # read it through the same helpers rather than agreeing by convention.
@@ -52,16 +59,17 @@ if TYPE_CHECKING:
 
 __all__ = [
     "ResultNode",
+    "SyncResultNode",
+    "SyncTaskResult",
     "TaskResult",
 ]
 
 
-class ResultNode(dict):
-    """One object in a task's result payload, viewed through its ``results`` schema.
+class _ResultNodeBase(dict):
+    """The payload and its hydration, which both kinds of result node share.
 
-    Nested objects and arrays of objects are hydrated into further nodes, so the whole
-    result is reachable by attribute access. Nodes annotated ``output: geoscience-object``
-    or ``output: attribute`` additionally offer :meth:`load` and :meth:`to_dataframe`.
+    It has no public loaders: :class:`ResultNode` awaits them and :class:`SyncResultNode`
+    blocks on them, so neither can stand in for the other and neither subclasses the other.
     """
 
     def __init__(
@@ -85,12 +93,18 @@ class ResultNode(dict):
         self._root: dict = self if root is None else root
         self._path = path
         properties = self._schema.get("properties", {}) or {}
+        node_type = self._node_type()
         super().__init__(
             {
-                name: _hydrate(value, properties.get(name), context, self._root, (*path, name))
+                name: _hydrate(value, properties.get(name), context, self._root, (*path, name), node_type)
                 for name, value in payload.items()
             }
         )
+
+    @classmethod
+    def _node_type(cls) -> type[_ResultNodeBase]:
+        """The class nested objects are hydrated into."""
+        raise NotImplementedError
 
     def __getattr__(self, name: str) -> Any:
         # Result fields are whatever the payload carried, so they cannot be declared up
@@ -102,16 +116,7 @@ class ResultNode(dict):
     def __dir__(self) -> list[str]:
         return sorted(set(super().__dir__()) | {key for key in self if isinstance(key, str) and key.isidentifier()})
 
-    async def load(self) -> BaseObject | AnyTypedAttribute:
-        """Load whatever this node refers to, as its typed class.
-
-        :return: The typed object for an ``output: geoscience-object`` node, or the typed
-            attribute for an ``output: attribute`` one.
-
-        :raises TypeError: If this node is not annotated as either.
-        :raises ValueError: If an attribute's owning object cannot be identified, or the
-            attribute is not on it.
-        """
+    async def _load(self) -> BaseObject | AnyTypedAttribute:
         match self._schema.get("output"):
             case "geoscience-object":
                 return await object_from_reference(self._context, self["reference"])
@@ -119,15 +124,8 @@ class ResultNode(dict):
                 return await self._load_attribute()
         raise TypeError("this result is not a geoscience object or attribute reference")
 
-    async def to_dataframe(self, *keys: str) -> pd.DataFrame:
-        """Load what this node refers to and read it into a DataFrame.
-
-        :param keys: Attributes to include, if the object's type accepts a selection. An
-            ``output: attribute`` node is a single column and takes none.
-
-        :raises TypeError: If this node is not a geoscience object or attribute reference.
-        """
-        loaded = await self.load()
+    async def _to_dataframe(self, *keys: str) -> pd.DataFrame:
+        loaded = await self._load()
         if isinstance(loaded, BaseObject):
             return await loaded.to_dataframe(*keys)
         if keys:
@@ -160,6 +158,41 @@ class ResultNode(dict):
         return found
 
 
+class ResultNode(_ResultNodeBase):
+    """One object in a task's result payload, viewed through its ``results`` schema.
+
+    Nested objects and arrays of objects are hydrated into further nodes, so the whole
+    result is reachable by attribute access. Nodes annotated ``output: geoscience-object``
+    or ``output: attribute`` additionally offer :meth:`load` and :meth:`to_dataframe`.
+    """
+
+    @classmethod
+    def _node_type(cls) -> type[ResultNode]:
+        return ResultNode
+
+    async def load(self) -> BaseObject | AnyTypedAttribute:
+        """Load whatever this node refers to, as its typed class.
+
+        :return: The typed object for an ``output: geoscience-object`` node, or the typed
+            attribute for an ``output: attribute`` one.
+
+        :raises TypeError: If this node is not annotated as either.
+        :raises ValueError: If an attribute's owning object cannot be identified, or the
+            attribute is not on it.
+        """
+        return await self._load()
+
+    async def to_dataframe(self, *keys: str) -> pd.DataFrame:
+        """Load what this node refers to and read it into a DataFrame.
+
+        :param keys: Attributes to include, if the object's type accepts a selection. An
+            ``output: attribute`` node is a single column and takes none.
+
+        :raises TypeError: If this node is not a geoscience object or attribute reference.
+        """
+        return await self._to_dataframe(*keys)
+
+
 class TaskResult(ResultNode):
     """What a task returned, hydrated against the ``results`` schema it published.
 
@@ -169,22 +202,84 @@ class TaskResult(ResultNode):
     """
 
 
-def _hydrate(value: Any, schema: Any, context: IContext, root: dict, path: tuple[str, ...]) -> Any:
+class SyncResultNode(_ResultNodeBase):
+    """A result node whose loaders block instead of being awaited.
+
+    What :class:`~evo.compute.engine.SyncComputeClient` hands back, so a result reads the
+    same way the call that produced it did::
+
+        result = client.geostatistics.kriging.run(...)
+        grid = result.target.load()
+        frame = result.target.attribute.to_dataframe()
+
+    Nothing else changes: the payload, the schema and the hydration are the async node's.
+    """
+
+    @classmethod
+    def _node_type(cls) -> type[SyncResultNode]:
+        return SyncResultNode
+
+    def load(self) -> BaseObject | AnyTypedAttribute:
+        """Load whatever this node refers to, blocking until it arrives.
+
+        :return: The typed object for an ``output: geoscience-object`` node, or the typed
+            attribute for an ``output: attribute`` one.
+        """
+        return run_sync(self._load())
+
+    def to_dataframe(self, *keys: str) -> pd.DataFrame:
+        """Load what this node refers to and read it into a DataFrame, blocking until done.
+
+        :param keys: Attributes to include, if the object's type accepts a selection. An
+            ``output: attribute`` node is a single column and takes none.
+        """
+        return run_sync(self._to_dataframe(*keys))
+
+
+class SyncTaskResult(SyncResultNode):
+    """What a task returned to :class:`~evo.compute.engine.SyncComputeClient`.
+
+    The same payload and hydration as a :class:`TaskResult`, except that
+    :meth:`~SyncResultNode.load` and :meth:`~SyncResultNode.to_dataframe` block, on this node
+    and on every node below it.
+    """
+
+    @classmethod
+    def from_result(cls, result: TaskResult) -> SyncTaskResult:
+        """Mirror an awaited result, giving the whole tree blocking loaders.
+
+        :param result: The result the asynchronous engine produced.
+
+        :return: The same payload, hydrated again against the same schema.
+        """
+        return cls(result, result._schema, result._context)
+
+
+def _hydrate(
+    value: Any, schema: Any, context: IContext, root: dict, path: tuple[str, ...], node_type: type[_ResultNodeBase]
+) -> Any:
     """Wrap the objects inside ``value``, leaving scalars and nulls as they came."""
     if isinstance(value, dict):
-        return ResultNode(value, schema, context, root=root, path=path)
+        return node_type(value, schema, context, root=root, path=path)
     if isinstance(value, list):
         items = schema.get("items") if isinstance(schema, dict) else None
-        return [_hydrate(item, items, context, root, (*path, str(index))) for index, item in enumerate(value)]
+        return [
+            _hydrate(item, items, context, root, (*path, str(index)), node_type) for index, item in enumerate(value)
+        ]
     return value
 
 
-def _search(owner: BaseObject, expression: str) -> dict[str, Any] | None:
-    """The first attribute a JMESPath expression selects on an object, if it selects any."""
+def _search(owner: BaseObject, expression: str) -> Mapping[str, Any] | None:
+    """The first attribute a JMESPath expression selects on an object, if it selects any.
+
+    ``BaseObject.search`` hands back ``JMESPathArrayProxy`` / ``JMESPathObjectProxy``, which
+    are a ``Sequence`` and a ``Mapping`` but *not* a ``list`` and a ``dict``, so the abstract
+    types are the ones to test against.
+    """
     found = owner.search(expression)
-    if isinstance(found, list):
-        found = found[0] if found else None
-    return found if isinstance(found, dict) else None
+    if isinstance(found, Sequence) and not isinstance(found, (str, bytes)):
+        found = found[0] if len(found) else None
+    return found if isinstance(found, Mapping) else None
 
 
 def _healed(expression: str, containers: Any, schema: ObjectSchema) -> str:

@@ -10,13 +10,14 @@
 #  limitations under the License.
 
 from . import tasks
+from ._sync import run_sync
 from .client import JobClient
 from .data import JobProgress, JobStatusEnum
 from .discovery import DiscoveryClient
 from .endpoints.models import TaskResource
-from .engine import ComputeClient
-from .exceptions import ParameterValidationError
-from .outputs import ResultNode, TaskResult
+from .engine import ComputeClient, SyncComputeClient
+from .exceptions import ParameterValidationError, SyncBridgeError
+from .outputs import ResultNode, SyncResultNode, SyncTaskResult, TaskResult
 from .resolution import ReferenceResolver
 
 __all__ = [
@@ -28,7 +29,12 @@ __all__ = [
     "ParameterValidationError",
     "ReferenceResolver",
     "ResultNode",
+    "SyncBridgeError",
+    "SyncComputeClient",
+    "SyncResultNode",
+    "SyncTaskResult",
     "TaskResource",
     "TaskResult",
+    "run_sync",
     "tasks",
 ]

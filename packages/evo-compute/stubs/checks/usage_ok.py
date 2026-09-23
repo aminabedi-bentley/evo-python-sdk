@@ -18,7 +18,7 @@ let ``tests/test_stubgen.py`` do it when the checker is installed.
 from evo.common import IContext
 from evo.objects.typed import Attribute, BaseObject, PendingAttribute
 
-from evo.compute import ComputeClient
+from evo.compute import ComputeClient, SyncComputeClient
 
 
 async def declustering(context: IContext) -> None:
@@ -106,3 +106,38 @@ async def typed_attribute_source(context: IContext, grade: Attribute, target: Ba
             "max_samples": 20,
         },
     )
+
+
+def declustering_without_await(context: IContext) -> None:
+    """The same call through the blocking client: no ``await``, all the way through.
+
+    ``run`` returns the result itself rather than a coroutine, and the loaders on every node
+    below it block too -- which is the whole difference between the two entry points.
+    """
+    client = SyncComputeClient(context)
+    result = client.geostatistics.declustering.run(
+        source={"object": "https://example.com/objects/samples"},
+        grid={"object": "https://example.com/objects/grid"},
+        target={
+            "object": "https://example.com/objects/samples",
+            "attribute": {"operation": "create", "name": "declustering_weight"},
+        },
+        neighborhood={
+            "ellipsoid": {
+                "ellipsoid_ranges": {"major": 100.0, "semi_major": 100.0, "minor": 50.0},
+                "rotation": {"dip_azimuth": 0.0, "dip": 0.0, "pitch": 0.0},
+            },
+            "max_samples": 20,
+        },
+        power=2.0,
+    )
+    print(result["message"], result.target.attribute.name)
+    result.target.load()
+    result.target.attribute.to_dataframe()
+
+
+def not_in_the_snapshot_without_await(context: IContext) -> None:
+    """``SyncComputeClient.run`` is the blocking escape hatch, mirroring ``arun``."""
+    client = SyncComputeClient(context)
+    result: dict = client.run("geostatistics", "some-new-task", {"source": "..."})
+    print(result)
