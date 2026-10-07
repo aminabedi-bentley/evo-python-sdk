@@ -38,6 +38,7 @@ import ast
 import json
 import keyword
 import re
+import subprocess
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -47,6 +48,7 @@ from .endpoints.models import TaskResource
 
 __all__ = [
     "capture_snapshot",
+    "generate_artifacts",
     "generate_stub",
     "load_snapshot",
 ]
@@ -188,6 +190,11 @@ class _TaskStub:
     types: list[_GeneratedType]
     run_parameters: list[str]
     return_type: str
+    blocking: bool = False
+
+    @property
+    def topic_class(self) -> str:
+        return f"_{'Sync' if self.blocking else ''}{_camel(self.topic)}Tasks"
 
 
 @dataclass
@@ -198,9 +205,16 @@ class _TaskRenderer:
     Within a task, structurally identical objects collapse onto one type -- the published
     schemas inline the same shape repeatedly (a filter condition appears at four depths in
     the kriging schema), and one name per shape keeps the stub readable.
+
+    Rendered a second time with ``blocking`` set, a task yields the mirror
+    :class:`~evo.compute.engine.SyncComputeClient` hands back: the same result tree, named
+    ``Sync...`` and rooted in the blocking result classes, so ``result.target.load()`` is an
+    object rather than a coroutine. Only the result side is generated twice -- the parameters
+    are identical, and their types are shared.
     """
 
     spec: TaskResource
+    blocking: bool = False
 
     prefix: str = field(init=False)
     section: str = field(default="", init=False)
@@ -210,7 +224,7 @@ class _TaskRenderer:
     _by_pointer: dict[str, str] = field(default_factory=dict, init=False)
 
     def __post_init__(self) -> None:
-        self.prefix = _camel(self.spec.name)
+        self.prefix = f"{'Sync' if self.blocking else ''}{_camel(self.spec.name)}"
 
     # -- naming ------------------------------------------------------------ #
 
@@ -257,7 +271,7 @@ class _TaskRenderer:
         # A result is what the platform sent back, so it arrives as a ``ResultNode`` -- a dict
         # that also loads what its references point at. Declaring the keys as attributes is
         # what makes ``result.target.attribute.name`` and ``.load()`` type-check together.
-        base = base or ("ResultNode" if self.section == "Result" else "TypedDict")
+        base = base or (self._result_node if self.section == "Result" else "TypedDict")
         hydrated = base != "TypedDict"
 
         annotations: dict[str, str] = {}
@@ -336,7 +350,41 @@ class _TaskRenderer:
         if self.section == "Result" or not isinstance(node, dict):
             return declared
         shorthand = self._shorthand_for(node, root)
-        return declared if shorthand is None or shorthand in declared else f"{declared} | {shorthand}"
+        if shorthand is not None and shorthand not in declared:
+            declared = f"{declared} | {shorthand}"
+        model = self._model_input_for(node, root)
+        if model is not None and re.search(rf"\b{model}\b", declared) is None:
+            declared = f"{declared} | {model}"
+        return declared
+
+    def _model_input_for(self, node: dict[str, Any], root: dict[str, Any]) -> str | None:
+        """Recognise SDK input models by their serialized fields, not schema names."""
+        node = _deref(node, root)
+        if node.get("type") != "object" or not set(node.get("required") or []) <= {"ellipsoid", "max_samples"}:
+            return None
+        ellipsoid = _deref((node.get("properties") or {}).get("ellipsoid", {}), root)
+        properties = ellipsoid.get("properties") or {}
+        containers = (
+            (ellipsoid, {"ellipsoid_ranges", "rotation"}),
+            (_deref(properties.get("ellipsoid_ranges", {}), root), {"major", "semi_major", "minor"}),
+            (_deref(properties.get("rotation", {}), root), {"dip_azimuth", "dip", "pitch"}),
+        )
+        if any(not set(container.get("required") or []) <= fields for container, fields in containers):
+            return None
+        fields = [(("max_samples",), "integer")]
+        fields.extend((("ellipsoid", "ellipsoid_ranges", axis), "number") for axis in ("major", "semi_major", "minor"))
+        fields.extend((("ellipsoid", "rotation", angle), "number") for angle in ("dip_azimuth", "dip", "pitch"))
+        if "min_samples" in (node.get("properties") or {}):
+            fields.append((("min_samples",), "integer"))
+        for path, expected_type in fields:
+            descendant = node
+            for name in path:
+                descendant = (_deref(descendant, root).get("properties") or {}).get(name, {})
+            declared_type = _deref(descendant, root).get("type")
+            declared_types = [declared_type] if isinstance(declared_type, str) else declared_type or []
+            if expected_type not in declared_types:
+                return None
+        return "SearchNeighborhood"
 
     def _shorthand_for(self, node: dict[str, Any], root: dict[str, Any]) -> str | None:
         """The value ``ReferenceResolver`` will expand into ``node``'s declared shape, if any.
@@ -412,24 +460,35 @@ class _TaskRenderer:
     def _return_type(self) -> str:
         results = self.spec.results
         if not isinstance(results, dict) or not results.get("properties"):
-            return "TaskResult"
+            return self._task_result
         # Everything reachable from the results schema is named ``<Task>Result...``, so an
         # input and an output shape sharing a schema title do not collide.
         self.section = "Result"
-        return self._typed_dict(results, results, ("result",), name_override=f"{self.prefix}Result", base="TaskResult")
+        return self._typed_dict(
+            results, results, ("result",), name_override=f"{self.prefix}Result", base=self._task_result
+        )
 
-    def render(self) -> _TaskStub:
+    @property
+    def _task_result(self) -> str:
+        return "SyncTaskResult" if self.blocking else "TaskResult"
+
+    @property
+    def _result_node(self) -> str:
+        return "SyncResultNode" if self.blocking else "ResultNode"
+
+    def render(self, run_parameters: list[str] | None = None) -> _TaskStub:
         # Parameters first, so the shapes callers write get the unqualified names.
-        run_parameters = self._run_parameters()
+        run_parameters = self._run_parameters() if run_parameters is None else run_parameters
         return_type = self._return_type()
         return _TaskStub(
             topic=self.spec.topic,
             attribute=self.spec.name.replace("-", "_"),
-            class_name=f"_{_camel(self.spec.topic)}{_camel(self.spec.name)}",
+            class_name=f"_{'Sync' if self.blocking else ''}{_camel(self.spec.topic)}{_camel(self.spec.name)}",
             description=(self.spec.description or "").strip(),
             types=self.types,
             run_parameters=run_parameters,
             return_type=return_type,
+            blocking=self.blocking,
         )
 
 
@@ -445,7 +504,7 @@ def load_snapshot(snapshot_dir: Path) -> list[TaskResource]:
     """
     tasks: list[TaskResource] = []
     for path in sorted(snapshot_dir.glob("*/*.json")):
-        payload = json.loads(path.read_text())
+        payload = json.loads(path.read_text(encoding="utf-8"))
         payload["topic"] = path.parent.name
         payload["name"] = path.stem
         tasks.append(TaskResource.model_validate(payload))
@@ -471,7 +530,7 @@ def _snapshot_json(payload: dict[str, Any]) -> str:
 
 def _header(snapshot_dir: Path) -> list[str]:
     manifest_path = snapshot_dir / _MANIFEST_NAME
-    manifest = json.loads(manifest_path.read_text()) if manifest_path.is_file() else {}
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8")) if manifest_path.is_file() else {}
     return [
         "#  Copyright © 2026 Bentley Systems, Incorporated",
         '#  Licensed under the Apache License, Version 2.0 (the "License");',
@@ -491,19 +550,24 @@ def _header(snapshot_dir: Path) -> list[str]:
         "#",
         "# The runtime is always live, so tasks published after the snapshot still run --",
         "# they are simply not statically known until the snapshot is refreshed. Use",
-        "# `ComputeClient.arun(topic, task, parameters)` to reach them.",
+        "# `ComputeClient.arun(topic, task, parameters)`, or `SyncComputeClient.run(...)`,",
+        "# to reach them.",
     ]
 
 
-def _render_client(stubs: list[_TaskStub]) -> list[str]:
-    topics = sorted({stub.topic for stub in stubs})
+def _render_client(stubs: list[_TaskStub], blocking: bool = False) -> list[str]:
+    name = "SyncComputeClient" if blocking else "ComputeClient"
+    entry = "blocking" if blocking else "asynchronous"
+    other = "ComputeClient" if blocking else "SyncComputeClient"
+    method = "run" if blocking else "arun"
     lines = [
-        "class ComputeClient:",
+        f"class {name}:",
         _docstring(
-            "Instance-bound async entry point to the compute task catalogue.\n\n"
+            f"Instance-bound {entry} entry point to the compute task catalogue.\n\n"
             "The topic and task attributes below come from a point-in-time snapshot of the\n"
             "discovery catalogue. The runtime resolves them live, so a task missing from this\n"
-            "stub still runs -- reach it with :meth:`arun`.",
+            f"stub still runs -- reach it with :meth:`{method}`.\n\n"
+            f"See :class:`{other}` for the same catalogue through the other entry point.",
             "    ",
         ),
         "",
@@ -516,7 +580,7 @@ def _render_client(stubs: list[_TaskStub]) -> list[str]:
         "        deep_validation: bool = ...,",
         "        check_schemas: bool | None = ...,",
         "    ) -> None: ...",
-        "    async def arun(",
+        f"    {'' if blocking else 'async '}def {method}(",
         "        self,",
         "        topic: str,",
         "        task: str,",
@@ -525,7 +589,7 @@ def _render_client(stubs: list[_TaskStub]) -> list[str]:
         "        validate: bool | None = ...,",
         "        deep_validation: bool | None = ...,",
         "        check_schemas: bool | None = ...,",
-        "    ) -> TaskResult:",
+        f"    ) -> {'SyncTaskResult' if blocking else 'TaskResult'}:",
         _docstring(
             "Run any task by name, including one this stub does not know about.",
             "        ",
@@ -534,12 +598,19 @@ def _render_client(stubs: list[_TaskStub]) -> list[str]:
         "    def __dir__(self) -> list[str]: ...",
         "    def __repr__(self) -> str: ...",
     ]
-    lines.extend(f"    {topic}: _{_camel(topic)}Tasks" for topic in topics)
+    lines.extend(
+        f"    {topic}: _{'Sync' if blocking else ''}{_camel(topic)}Tasks"
+        for topic in sorted({stub.topic for stub in stubs})
+    )
     return lines
 
 
 def _render(tasks: list[TaskResource], snapshot_dir: Path) -> str:
-    stubs = [_TaskRenderer(task).render() for task in sorted(tasks, key=lambda task: (task.topic, task.name))]
+    ordered = sorted(tasks, key=lambda task: (task.topic, task.name))
+    awaited = [_TaskRenderer(task).render() for task in ordered]
+    # The blocking mirror reuses the parameter types verbatim; only the results differ.
+    blocking = [_TaskRenderer(task, blocking=True).render(stub.run_parameters) for task, stub in zip(ordered, awaited)]
+    stubs = [*awaited, *blocking]
 
     blocks: list[str] = []
     for stub in stubs:
@@ -550,7 +621,7 @@ def _render(tasks: list[TaskResource], snapshot_dir: Path) -> str:
         if stub.description:
             lines.append(_docstring(stub.description, "    "))
             lines.append("")
-        lines.append("    async def run(")
+        lines.append(f"    {'' if stub.blocking else 'async '}def run(")
         lines.append("        self,")
         if stub.run_parameters != ["**parameters: Any"]:
             lines.append("        *,")
@@ -565,16 +636,19 @@ def _render(tasks: list[TaskResource], snapshot_dir: Path) -> str:
             lines.append(f"    ) -> {stub.return_type}: ...")
         blocks.append("\n".join(lines))
 
-    for topic in sorted({stub.topic for stub in stubs}):
-        lines = [
-            f"class _{_camel(topic)}Tasks:",
-            _docstring(f"Tasks published under the ``{topic}`` topic.", "    "),
-            "",
-        ]
-        lines.extend(f"    {stub.attribute}: {stub.class_name}" for stub in stubs if stub.topic == topic)
-        blocks.append("\n".join(lines))
+    for family in (awaited, blocking):
+        for topic in sorted({stub.topic for stub in family}):
+            in_topic = [stub for stub in family if stub.topic == topic]
+            lines = [
+                f"class {in_topic[0].topic_class}:",
+                _docstring(f"Tasks published under the ``{topic}`` topic.", "    "),
+                "",
+            ]
+            lines.extend(f"    {stub.attribute}: {stub.class_name}" for stub in in_topic)
+            blocks.append("\n".join(lines))
 
-    blocks.append("\n".join(_render_client(stubs)))
+    blocks.append("\n".join(_render_client(awaited)))
+    blocks.append("\n".join(_render_client(blocking, blocking=True)))
 
     body = "\n\n".join(blocks)
     used = {name: alias for name, alias in _REFERENCE_ALIASES.items() if re.search(rf"\b{name}\b", body)}
@@ -591,6 +665,7 @@ def _render(tasks: list[TaskResource], snapshot_dir: Path) -> str:
         *(["Protocol"] if "Protocol)" in declared else []),
     ]
     extensions = [name for name in ("NotRequired", "TypedDict") if name in body]
+    outputs = [name for name in ("ResultNode", "SyncResultNode", "SyncTaskResult", "TaskResult") if name in body]
     imports = [
         f"from typing import {', '.join(typing_names)}",
         *(["from uuid import UUID"] if "ObjectInput" in used else []),
@@ -600,10 +675,22 @@ def _render(tasks: list[TaskResource], snapshot_dir: Path) -> str:
         *(["from evo.objects.typed import BaseObject, DownloadedObject"] if "ObjectInput" in used else []),
         *([f"from typing_extensions import {', '.join(extensions)}"] if extensions else []),
         "",
-        "from .outputs import ResultNode, TaskResult",
+        f"from .outputs import {', '.join(outputs)}",
+        *(
+            ["from .tasks.common.search import SearchNeighborhood"]
+            if re.search(r"\bSearchNeighborhood\b", body)
+            else []
+        ),
         *(["from .tasks.common.source_target import AnyTypedAttribute"] if "AnyTypedAttribute" in declared else []),
     ]
-    preamble = [*_header(snapshot_dir), "", *imports, "", '__all__ = ["ComputeClient"]', *(aliases or [""])]
+    preamble = [
+        *_header(snapshot_dir),
+        "",
+        *imports,
+        "",
+        '__all__ = ["ComputeClient", "SyncComputeClient"]',
+        *(aliases or [""]),
+    ]
     return "\n".join(preamble) + "\n" + body + "\n"
 
 
@@ -619,6 +706,219 @@ def generate_stub(snapshot_dir: Path = DEFAULT_SNAPSHOT_DIR, output: Path = DEFA
     if not tasks:
         raise FileNotFoundError(f"no task schemas found in {snapshot_dir}")
     return _render(tasks, snapshot_dir)
+
+
+def _catalogue_exports(tasks: list[TaskResource]) -> dict[str, dict[str, str]]:
+    from ._task_handles import _registered_exports
+
+    registered = _registered_exports()
+    preferred = {(topic, identity): name for topic, names in registered.items() for name, identity in names.items()}
+    catalogue: dict[str, dict[str, str]] = {}
+    for resource in sorted(tasks, key=lambda resource: (resource.topic, resource.name)):
+        names = catalogue.setdefault(resource.topic, {})
+        name = preferred.get((resource.topic, resource.name), _camel(resource.name))
+        if name in names and names[name] != resource.name:
+            raise ValueError(f"Task import name {resource.topic}.{name} is ambiguous")
+        names[name] = resource.name
+    for topic, names in registered.items():
+        target = catalogue.setdefault(topic, {})
+        for name, identity in names.items():
+            target.setdefault(name, identity)
+    return catalogue
+
+
+def _qualified_annotation(annotation: str) -> str:
+    expression = ast.parse(annotation, mode="eval")
+    plain = {"Any", "Literal", "str", "int", "float", "bool", "bytes", "dict", "list", "tuple", "set", "object"}
+
+    class Qualify(ast.NodeTransformer):
+        def visit_Name(self, node: ast.Name) -> ast.AST:
+            if node.id in plain:
+                return node
+            owner = "_engine"
+            if node.id in {"TaskResult", "SyncTaskResult", "ResultNode", "SyncResultNode"}:
+                owner = "_outputs"
+            elif node.id == "SearchNeighborhood":
+                owner = "_search"
+            elif node.id == "AnyTypedAttribute":
+                owner = "_source_target"
+            return ast.Attribute(value=ast.Name(id=owner, ctx=ast.Load()), attr=node.id, ctx=ast.Load())
+
+    return ast.unparse(Qualify().visit(expression))
+
+
+def _render_facade(tasks: list[TaskResource], snapshot_dir: Path, catalogue: dict[str, dict[str, str]]) -> str:
+    by_identity = {(resource.topic, resource.name): resource for resource in tasks}
+    blocks = [
+        "from collections.abc import Mapping",
+        "from typing import Any, Literal, overload",
+        "",
+        "from evo.common import IContext",
+        "from pydantic import BaseModel",
+        "from typing_extensions import NotRequired, TypedDict",
+        "",
+        "from . import engine as _engine",
+        "from . import outputs as _outputs",
+        "from ._task_handles import TaskHandle",
+        "from .tasks.common import search as _search",
+        "from .tasks.common import source_target as _source_target",
+    ]
+    for topic, names in sorted(catalogue.items()):
+        for name, identity in sorted(names.items()):
+            class_name = f"_{_camel(topic)}{name}Handle"
+            resource = by_identity.get((topic, identity))
+            if resource is None:
+                blocks.append(f"class {class_name}(TaskHandle[Any, Any]): ...")
+                continue
+            awaited = _TaskRenderer(resource).render()
+            blocking = _TaskRenderer(resource, blocking=True).render(awaited.run_parameters)
+            parameters_name = f"_{_camel(topic)}{name}Parameters"
+            declarations = []
+            for parameter in awaited.run_parameters:
+                parameter_name, _, annotation = parameter.partition(":")
+                if parameter_name == "preview" or parameter_name.startswith("*"):
+                    continue
+                annotation, _, default = annotation.partition(" = ")
+                annotation = _qualified_annotation(annotation.strip())
+                declarations.append(
+                    f"    {parameter_name}: {'NotRequired[' + annotation + ']' if default else annotation}"
+                )
+            if declarations:
+                blocks.append("\n".join([f"class {parameters_name}(TypedDict):", *declarations]))
+                mapping_type = parameters_name
+            else:
+                mapping_type = "Mapping[str, Any]"
+            lines = [
+                f"class {class_name}:",
+                "    @property",
+                "    def topic(self) -> str: ...",
+                "    @property",
+                "    def task(self) -> str: ...",
+            ]
+            if awaited.description:
+                lines.insert(1, _docstring(awaited.description, "    "))
+            for method, stub in (("run", blocking), ("arun", awaited)):
+                prefix = "async " if method == "arun" else ""
+                returns = _qualified_annotation(stub.return_type)
+                lines.extend(
+                    [
+                        "    @overload",
+                        f"    {prefix}def {method}(",
+                        "        self, context: IContext,",
+                        f"        parameters: {mapping_type} | BaseModel, /,",
+                        "        *, preview: bool | None = ...",
+                        f"    ) -> {returns}: ...",
+                        "    @overload",
+                        f"    {prefix}def {method}(",
+                        "        self, context: IContext, /,",
+                    ]
+                )
+                if stub.run_parameters != ["**parameters: Any"]:
+                    lines.append("        *,")
+                for parameter in stub.run_parameters:
+                    parameter_name, _, annotation = parameter.partition(":")
+                    annotation, separator, default = annotation.partition(" = ")
+                    if parameter_name == "preview":
+                        annotation = "bool | None"
+                    annotation = _qualified_annotation(annotation.strip())
+                    lines.append(f"        {parameter_name}: {annotation}{separator}{default},")
+                lines.append(f"    ) -> {returns}: ...")
+            blocks.append("\n".join(lines))
+    return "\n".join(_header(snapshot_dir)) + "\n\n" + "\n\n".join(blocks) + "\n"
+
+
+def _render_task_package(source: Path, exports: dict[str, str], snapshot_dir: Path, *, topic: str | None = None) -> str:
+    tree = ast.parse(source.read_text(encoding="utf-8"))
+    public: set[str] = set()
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and any(
+            isinstance(target, ast.Name) and target.id == "__all__" for target in node.targets
+        ):
+            public.update(ast.literal_eval(node.value))
+    functions = [
+        node for node in tree.body if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name in public
+    ]
+    needed = set(public)
+    for node in functions:
+        needed.update(child.id for child in ast.walk(node.args) if isinstance(child, ast.Name))
+        if node.returns is not None:
+            needed.update(child.id for child in ast.walk(node.returns) if isinstance(child, ast.Name))
+        for decorator in node.decorator_list:
+            needed.update(child.id for child in ast.walk(decorator) if isinstance(child, ast.Name))
+    blocks = [*_header(snapshot_dir), ""]
+    for node in tree.body:
+        if isinstance(node, ast.ImportFrom):
+            aliases = [
+                ast.alias(name=alias.name, asname=alias.asname or (alias.name if alias.name in public else None))
+                for alias in node.names
+                if (alias.asname or alias.name) in needed
+            ]
+            if aliases:
+                blocks.append(ast.unparse(ast.ImportFrom(module=node.module, names=aliases, level=node.level)))
+    relative = "..." if topic else ".."
+    handles = sorted({class_name for name, class_name in exports.items() if name not in public})
+    if handles:
+        blocks.append(f"from {relative}_facade_types import {', '.join(handles)}")
+    for node in functions:
+        description = ast.get_docstring(node)
+        node.body = ([ast.Expr(value=ast.Constant(value=description))] if description else []) + [
+            ast.Expr(value=ast.Constant(value=Ellipsis))
+        ]
+        blocks.extend(["", ast.unparse(node)])
+    for name, class_name in sorted(exports.items()):
+        if name not in public:
+            blocks.append(f"{name}: {class_name}")
+    blocks.extend(["", f"__all__ = {sorted(public | exports.keys())!r}", ""])
+    return "\n".join(blocks)
+
+
+def _format_artifact(source: str, output: Path) -> str:
+    source = subprocess.run(
+        ["ruff", "check", "--fix", "--select", "I,F401,RUF022", "--stdin-filename", str(output), "-"],
+        input=source,
+        capture_output=True,
+        encoding="utf-8",
+        check=True,
+    ).stdout
+    return subprocess.run(
+        ["ruff", "format", "--stdin-filename", str(output), "-"],
+        input=source,
+        capture_output=True,
+        encoding="utf-8",
+        check=True,
+    ).stdout
+
+
+def generate_artifacts(snapshot_dir: Path = DEFAULT_SNAPSHOT_DIR, output: Path = DEFAULT_OUTPUT) -> dict[Path, str]:
+    """Generate execution hints and task import metadata without fetching live discovery."""
+    tasks = load_snapshot(snapshot_dir)
+    catalogue = _catalogue_exports(tasks)
+    root = output.parent
+    aliases: dict[str, list[tuple[str, str]]] = {}
+    for topic, names in catalogue.items():
+        for name, identity in names.items():
+            aliases.setdefault(name, []).append((topic, identity))
+    unique = {
+        name: f"_{_camel(locations[0][0])}{name}Handle" for name, locations in aliases.items() if len(locations) == 1
+    }
+    sources = {
+        output: generate_stub(snapshot_dir, output),
+        root / "_task_catalogue.json": json.dumps(catalogue, indent=2, sort_keys=True) + "\n",
+        root / "_facade_types.pyi": _render_facade(tasks, snapshot_dir, catalogue),
+        root / "tasks" / "__init__.pyi": _render_task_package(
+            _PACKAGE_DIR / "tasks" / "__init__.py", unique, snapshot_dir
+        ),
+        root / "tasks" / "geostatistics" / "__init__.pyi": _render_task_package(
+            _PACKAGE_DIR / "tasks" / "geostatistics" / "__init__.py",
+            {name: f"_Geostatistics{name}Handle" for name in catalogue.get("geostatistics", {})},
+            snapshot_dir,
+            topic="geostatistics",
+        ),
+    }
+    return {
+        path: _format_artifact(source, path) if path.suffix == ".pyi" and path != output else source
+        for path, source in sources.items()
+    }
 
 
 def capture_snapshot(snapshot_dir: Path = DEFAULT_SNAPSHOT_DIR) -> list[TaskResource]:
@@ -656,14 +956,14 @@ def capture_snapshot(snapshot_dir: Path = DEFAULT_SNAPSHOT_DIR) -> list[TaskReso
     for task in tasks:
         path = snapshot_dir / task.topic / f"{task.name}.json"
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(_snapshot_json(_snapshot_payload(task)))
+        path.write_text(_snapshot_json(_snapshot_payload(task)), encoding="utf-8")
 
     manifest = {
         "source": "GET /compute/orgs/{org_id}/tasks?details=true",
         "captured_at": date.today().isoformat(),
         "tasks": [{"topic": task.topic, "name": task.name, "version": task.version} for task in tasks],
     }
-    (snapshot_dir / _MANIFEST_NAME).write_text(_snapshot_json(manifest))
+    (snapshot_dir / _MANIFEST_NAME).write_text(_snapshot_json(manifest), encoding="utf-8")
     return tasks
 
 
@@ -685,17 +985,24 @@ def main(argv: list[str] | None = None) -> int:
         print(f"captured {len(tasks)} tasks to {arguments.snapshot}")
         return 0
 
-    stub = generate_stub(arguments.snapshot, arguments.output)
+    artifacts = generate_artifacts(arguments.snapshot, arguments.output)
     if arguments.check:
-        current = arguments.output.read_text() if arguments.output.is_file() else ""
-        if current != stub:
-            print(f"{arguments.output} is out of date; run `python -m evo.compute._stubgen generate`", file=sys.stderr)
+        stale = [
+            path
+            for path, source in artifacts.items()
+            if not path.is_file() or path.read_text(encoding="utf-8") != source
+        ]
+        if stale:
+            for path in stale:
+                print(f"{path} is out of date; run `python -m evo.compute._stubgen generate`", file=sys.stderr)
             return 1
-        print(f"{arguments.output} is up to date")
+        print(f"{len(artifacts)} generated artifacts are up to date")
         return 0
 
-    arguments.output.write_text(stub)
-    print(f"wrote {arguments.output} ({len(stub.splitlines())} lines)")
+    for path, source in artifacts.items():
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(source, encoding="utf-8")
+        print(f"wrote {path} ({len(source.splitlines())} lines)")
     return 0
 
 

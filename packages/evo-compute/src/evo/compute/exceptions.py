@@ -54,3 +54,12 @@ class ParameterValidationError(ValueError):
         super().__init__(message)
         self.task = task
         self.errors = errors or []
+
+
+class SyncBridgeError(RuntimeError):
+    """Raised when a blocking call cannot be run on the synchronous bridge.
+
+    Either the call came from inside the bridge's own event loop, where waiting for its
+    result would deadlock, or the context it was made against belongs to a different loop
+    and so cannot be driven from the bridge at all.
+    """

@@ -30,7 +30,7 @@ Example:
 
 from __future__ import annotations
 
-from typing import overload
+from typing import Any, overload
 
 from evo.common import IContext
 from evo.common.interfaces import IFeedback
@@ -190,3 +190,18 @@ __all__ = [
     "UpdateAttribute",
     "run",
 ]
+
+
+def __getattr__(name: str) -> Any:
+    from .._task_handles import _import_task
+
+    return _import_task(name)
+
+
+def __dir__() -> list[str]:
+    from .._task_handles import _export_names
+
+    return sorted(set(__all__) | set(_export_names()))
+
+
+__all__ += [name for name in __dir__() if name not in __all__]

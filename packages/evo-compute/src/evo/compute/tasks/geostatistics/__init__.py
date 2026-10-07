@@ -75,3 +75,18 @@ __all__ = [
     "KrigingResult",
     "LocationWiseResult",
 ]
+
+
+def __getattr__(name: str):
+    from ..._task_handles import _import_task
+
+    return _import_task(name, "geostatistics")
+
+
+def __dir__() -> list[str]:
+    from ..._task_handles import _export_names
+
+    return sorted(set(__all__) | set(_export_names("geostatistics")))
+
+
+__all__ += [name for name in __dir__() if name not in __all__]

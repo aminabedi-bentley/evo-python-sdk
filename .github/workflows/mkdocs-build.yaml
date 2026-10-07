@@ -34,6 +34,7 @@ jobs:
       - name: Build MkDocs documentation
         run: |
           uv run mkdocs build --config-file mkdocs/mkdocs.yml --site-dir site
+          git add --intent-to-add mkdocs
 
       - name: Check for changes
         id: changes

@@ -26,6 +26,8 @@ from __future__ import annotations
 import ast
 import inspect
 import json
+import os
+import re
 import shutil
 import subprocess
 import sys
@@ -33,7 +35,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from evo.compute import ComputeClient, ParameterValidationError, _stubgen
+from evo.compute import ComputeClient, ParameterValidationError, SyncComputeClient, _stubgen
 from evo.compute.endpoints.models import TaskResource
 from evo.compute.engine import _signature_from_schema
 from evo.compute.validation import validate_parameters
@@ -58,7 +60,7 @@ class TestGeneratedArtifact(unittest.TestCase):
     def test_stub_is_up_to_date(self) -> None:
         """The committed stub must be reproducible from the committed snapshot."""
         expected = _stubgen.generate_stub()
-        actual = _stubgen.DEFAULT_OUTPUT.read_text()
+        actual = _stubgen.DEFAULT_OUTPUT.read_text(encoding="utf-8")
         self.assertEqual(
             expected,
             actual,
@@ -67,6 +69,51 @@ class TestGeneratedArtifact(unittest.TestCase):
 
     def test_generation_is_deterministic(self) -> None:
         self.assertEqual(_stubgen.generate_stub(), _stubgen.generate_stub())
+
+    def test_all_generated_artifacts_are_up_to_date(self) -> None:
+        for path, source in _stubgen.generate_artifacts().items():
+            with self.subTest(artifact=path.name):
+                self.assertEqual(source, path.read_text(encoding="utf-8"))
+
+    def test_all_generated_stubs_are_valid_python(self) -> None:
+        for path, source in _stubgen.generate_artifacts().items():
+            if path.suffix == ".pyi":
+                with self.subTest(artifact=str(path)):
+                    ast.parse(source, filename=str(path))
+
+    def test_import_index_contains_identities_not_schemas(self) -> None:
+        artifacts = _stubgen.generate_artifacts()
+        catalogue = json.loads(artifacts[_stubgen.DEFAULT_OUTPUT.parent / "_task_catalogue.json"])
+        self.assertEqual("declustering", catalogue["geostatistics"]["Declustering"])
+        self.assertEqual("kriging", catalogue["geostatistics"]["Kriging"])
+        self.assertTrue(all(isinstance(identity, str) for names in catalogue.values() for identity in names.values()))
+
+    def test_facade_io_annotations_use_their_defining_modules(self) -> None:
+        self.assertEqual("_outputs.TaskResult", _stubgen._qualified_annotation("TaskResult"))
+        self.assertEqual("_outputs.SyncTaskResult", _stubgen._qualified_annotation("SyncTaskResult"))
+        self.assertEqual("_search.SearchNeighborhood", _stubgen._qualified_annotation("SearchNeighborhood"))
+        self.assertEqual("_source_target.AnyTypedAttribute", _stubgen._qualified_annotation("AnyTypedAttribute"))
+
+    def test_generation_and_check_work_without_a_utf8_locale(self) -> None:
+        script = "\n".join(
+            [
+                "import sys",
+                "from pathlib import Path",
+                "from evo.compute import _stubgen",
+                "output = sys.argv[1]",
+                "assert _stubgen.main(['generate', '--output', output]) == 0",
+                "assert _stubgen.main(['generate', '--output', output, '--check']) == 0",
+                "assert '\\u00a9' in Path(output).read_bytes().decode('utf-8')",
+            ]
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            result = subprocess.run(
+                [sys.executable, "-c", script, str(Path(directory) / "engine.pyi")],
+                capture_output=True,
+                encoding="utf-8",
+                env={**os.environ, "LC_ALL": "C", "PYTHONUTF8": "0", "PYTHONCOERCECLOCALE": "0"},
+            )
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
 
     def test_a_file_reference_brings_its_structural_handles(self) -> None:
         """No snapshotted task takes a file yet, so the aliases are only reachable this way.
@@ -113,21 +160,120 @@ class TestGeneratedArtifact(unittest.TestCase):
                 self.assertEqual(list(_signature_from_schema(task).parameters), declared)
 
     def test_the_client_signatures_are_not_hand_maintained_into_drift(self) -> None:
-        """The task surface is generated, but ``ComputeClient``'s own methods are written out.
+        """The task surface is generated, but the clients' own methods are written out.
 
         Nothing else notices when the engine gains a keyword, so the stub silently stops
         describing the class it stands for -- which is how ``check_schemas`` went missing.
         """
-        rendered = "\n".join(_stubgen._render_client([]))
-        for method in (ComputeClient.__init__, ComputeClient.arun):
-            with self.subTest(method=method.__name__):
-                expected = [name for name in inspect.signature(method).parameters if name != "self"]
-                block = rendered.split(f"def {method.__name__}(")[1].split(") ->")[0]
-                declared = [line.strip().split(":")[0] for line in block.splitlines() if ":" in line]
-                self.assertEqual(expected, declared)
+        clients = (
+            (False, ComputeClient.__init__, ComputeClient.arun),
+            (True, SyncComputeClient.__init__, SyncComputeClient.run),
+        )
+        for blocking, *methods in clients:
+            rendered = "\n".join(_stubgen._render_client([], blocking=blocking))
+            for method in methods:
+                with self.subTest(blocking=blocking, method=method.__name__):
+                    expected = [name for name in inspect.signature(method).parameters if name != "self"]
+                    block = rendered.split(f"def {method.__name__}(")[1].split(") ->")[0]
+                    declared = [line.strip().split(":")[0] for line in block.splitlines() if ":" in line]
+                    self.assertEqual(expected, declared)
+
+    def test_the_blocking_mirror_is_generated_for_every_task(self) -> None:
+        """``SyncComputeClient`` is only worth stubbing if it reaches the same tasks."""
+        stub = _stubgen.DEFAULT_OUTPUT.read_text()
+        for task in _stubgen.load_snapshot(_stubgen.DEFAULT_SNAPSHOT_DIR):
+            name = f"_Sync{_stubgen._camel(task.topic)}{_stubgen._camel(task.name)}"
+            with self.subTest(task=f"{task.topic}.{task.name}"):
+                self.assertIn(f"class {name}:", stub)
+                block = stub.split(f"class {name}:")[1].split("\n\nclass ")[0]
+                self.assertIn("    def run(", block)
+                self.assertNotIn("    async def run(", block)
+
+    def test_the_two_surfaces_take_the_same_parameters(self) -> None:
+        """Only the results differ between the mirrors; the parameter types are shared."""
+        for task in _stubgen.load_snapshot(_stubgen.DEFAULT_SNAPSHOT_DIR):
+            with self.subTest(task=f"{task.topic}.{task.name}"):
+                awaited = _stubgen._TaskRenderer(task).render()
+                blocking = _stubgen._TaskRenderer(task, blocking=True).render(awaited.run_parameters)
+                self.assertEqual(awaited.run_parameters, blocking.run_parameters)
+                self.assertEqual(f"Sync{awaited.return_type}", blocking.return_type)
+
+    def test_a_blocking_result_is_rooted_in_the_blocking_classes(self) -> None:
+        """Otherwise ``result.target.load()`` would still be declared as a coroutine."""
+        stub = _stubgen.DEFAULT_OUTPUT.read_text()
+        self.assertIn("class SyncDeclusteringResult(SyncTaskResult):", stub)
+        self.assertIn("class SyncDeclusteringResultTarget(SyncResultNode):", stub)
+        self.assertIn("    target: SyncDeclusteringResultTarget", stub)
 
 
 class TestAnnotations(unittest.TestCase):
+    def test_search_neighborhood_model_is_an_alternative_input(self) -> None:
+        spec = next(
+            task
+            for task in _stubgen.load_snapshot(_stubgen.DEFAULT_SNAPSHOT_DIR)
+            if task.topic == "geostatistics" and task.name == "declustering"
+        )
+        parameters = _stubgen._TaskRenderer(spec).render().run_parameters
+        annotation = next(parameter for parameter in parameters if parameter.startswith("neighborhood:")).split(
+            ": ", 1
+        )[1]
+        self.assertIn("SearchNeighborhood", annotation.split(" | "))
+
+    def test_neighborhood_model_matching_is_structural_and_input_only(self) -> None:
+        spec = next(
+            task
+            for task in _stubgen.load_snapshot(_stubgen.DEFAULT_SNAPSHOT_DIR)
+            if task.topic == "geostatistics" and task.name == "declustering"
+        ).model_copy(deep=True)
+        neighborhood = spec.parameters["properties"]["neighborhood"]
+        neighborhood["title"] = "Options"
+        schema = {
+            "type": "object",
+            "properties": {
+                "options": {"$ref": "#/$defs/Options"},
+                "optional_options": {"anyOf": [{"$ref": "#/$defs/Options"}, {"type": "null"}]},
+            },
+            "required": ["options"],
+            "$defs": {"Options": neighborhood},
+        }
+        stub = _stubgen._TaskRenderer(
+            _spec(parameters=schema, results={"type": "object", "properties": {"options": neighborhood}})
+        ).render()
+        self.assertIn("SearchNeighborhood", stub.run_parameters[0])
+        self.assertIn("SearchNeighborhood", stub.run_parameters[1])
+        result_types = [generated.body for generated in stub.types if "(ResultNode)" in generated.body]
+        self.assertNotIn("SearchNeighborhood", "\n".join(result_types))
+
+    def test_unrelated_shapes_do_not_accept_the_neighborhood_model(self) -> None:
+        spec = next(
+            task
+            for task in _stubgen.load_snapshot(_stubgen.DEFAULT_SNAPSHOT_DIR)
+            if task.topic == "geostatistics" and task.name == "declustering"
+        )
+        for mismatch in ("sample_type", "range_type", "extra_required_field", "nested_required_field"):
+            with self.subTest(mismatch=mismatch):
+                incompatible = spec.model_copy(deep=True)
+                neighborhood = incompatible.parameters["properties"]["neighborhood"]
+                neighborhood["title"] = "SearchNeighborhood"
+                if mismatch == "sample_type":
+                    neighborhood["properties"]["max_samples"]["type"] = "string"
+                elif mismatch == "range_type":
+                    neighborhood["properties"]["ellipsoid"]["properties"]["ellipsoid_ranges"]["properties"]["major"][
+                        "type"
+                    ] = "string"
+                elif mismatch == "extra_required_field":
+                    neighborhood["properties"]["token"] = {"type": "string"}
+                    neighborhood["required"].append("token")
+                else:
+                    ellipsoid = neighborhood["properties"]["ellipsoid"]
+                    ellipsoid["properties"]["token"] = {"type": "string"}
+                    ellipsoid["required"].append("token")
+                parameters = _stubgen._TaskRenderer(incompatible).render().run_parameters
+                annotation = next(parameter for parameter in parameters if parameter.startswith("neighborhood:")).split(
+                    ": ", 1
+                )[1]
+                self.assertNotIn("SearchNeighborhood", annotation.split(" | "))
+
     def test_scalars_map_to_python_types(self) -> None:
         spec = _spec(
             parameters={
@@ -550,16 +696,29 @@ class TestTypeCheckers(unittest.TestCase):
 
         code, report = _run_type_checker(executable, "usage_bad.py")
         self.assertNotEqual(0, code, "the deliberately broken usage file type-checked cleanly")
+        tree = ast.parse((_CHECKS_DIR / "usage_bad.py").read_text())
         expected = ast.literal_eval(
             next(
                 node.value
-                for node in ast.parse((_CHECKS_DIR / "usage_bad.py").read_text()).body
+                for node in tree.body
                 if isinstance(node, ast.Assign) and node.targets[0].id == "EXPECTED_ERRORS"  # type: ignore[attr-defined]
             )
         )
         for name in expected:
             with self.subTest(error=name):
-                self.assertIn(name, report)
+                self.assertIn(name[executable] if isinstance(name, dict) else name, report)
+        error_lines = {int(line) for line in re.findall(r"usage_bad\.py:(\d+)(?::\d+)?(?: -|:)\s*error:", report)}
+        for node in tree.body:
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name in {
+                "unrelated_neighborhood_model_async",
+                "unrelated_neighborhood_model_blocking",
+                "malformed_neighborhood_dictionary",
+            }:
+                with self.subTest(rejected_input=node.name):
+                    self.assertTrue(
+                        any(node.lineno <= line <= node.end_lineno for line in error_lines),
+                        f"{node.name} was not rejected by {executable}:\n{report}",
+                    )
 
     def test_pyright(self) -> None:
         """Optional: pyright needs a node runtime, so it is not a test dependency."""
