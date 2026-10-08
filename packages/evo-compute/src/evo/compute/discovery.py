@@ -200,7 +200,7 @@ class DiscoveryClient:
         """Return a single task by topic and name, or ``None`` if it is not advertised.
 
         :param topic: The task topic.
-        :param name: The task name as advertised by the platform (e.g. ``kriging-gcp``).
+        :param name: The task name as advertised by the platform (e.g. ``normal-score``).
         :param force_refresh: Re-fetch the catalogue even if the cache is still valid.
 
         :return: The matching task, or ``None``.

@@ -1,0 +1,19 @@
+{
+  "geostatistics": {
+    "BreakTies": "break-ties",
+    "ConSim": "consim",
+    "ConditionalTurningBands": "conditional-turning-bands",
+    "ContinuousDistribution": "continuous-distribution",
+    "Declustering": "declustering",
+    "IDW": "idw",
+    "KNN": "knn",
+    "Kriging": "kriging",
+    "KrigingGcp": "kriging-gcp",
+    "LocationWise": "location-wise",
+    "LossCalculation": "loss-calculation",
+    "NormalScore": "normal-score",
+    "NormalScoreGcp": "normal-score-gcp",
+    "ProfitCalculation": "profit-calculation",
+    "SimulationReport": "simulation-report"
+  }
+}

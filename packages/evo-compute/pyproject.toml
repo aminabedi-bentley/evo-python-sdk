@@ -36,6 +36,7 @@ test = [
     "mypy",
     "parameterized==0.9.0",
     "pytest",
+    "ruff",
 ]
 dev = [
     "evo-sdk-common[notebooks]",

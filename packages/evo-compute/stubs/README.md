@@ -2,12 +2,16 @@
 
 `ComputeClient` builds its `client.<topic>.<task>.run(...)` namespace at runtime from the
 live discovery catalogue. Nothing about that surface exists in `engine.py`, so a type
-checker sees `Any` and an editor offers no completion.
+checker sees `Any` and an editor offers no completion. `SyncComputeClient` mirrors that
+surface without the `await`, and has the same problem.
 
 This directory closes that gap. An **offline** generator turns a checked-in snapshot of the
 task catalogue into [`src/evo/compute/engine.pyi`](../src/evo/compute/engine.pyi), which
 type checkers read instead of `engine.py`. Every snapshotted task then gets completion,
-signature help, hover documentation, parameter type-checking and a typed result.
+signature help, hover documentation, parameter type-checking and a typed result, through
+either client. Imported task handles get the same parameter and result hints through a shared
+facade stub and re-exports in the task packages. A small JSON index supplies import names and
+canonical identities only; it contains no execution schemas.
 
 ```
 stubs/
@@ -48,14 +52,15 @@ if TYPE_CHECKING:
 ## Regenerating
 
 ```shell
-make stubs-compute                        # rewrite engine.pyi from the snapshot
-make check-stubs-compute                  # fail if engine.pyi is stale
+make stubs-compute                        # rewrite all compute hint/import artifacts
+make check-stubs-compute                  # fail if any artifact is stale
 python -m evo.compute._stubgen generate   # the same thing, without uv
 ```
 
-Generation reads only the snapshot: no credentials, no network, no import of the tasks it
-describes. `tests/test_stubgen.py::test_stub_is_up_to_date` regenerates and compares, so a
-snapshot change that is not accompanied by a regenerated stub fails the normal test run.
+Generation reads the snapshot and existing SDK declarations: no credentials, no network, and
+no generated execution wrappers. It writes `engine.pyi`, `_facade_types.pyi`, the task-package
+`__init__.pyi` files, and `_task_catalogue.json`. The normal generator tests compare every artifact
+against its committed version, so snapshot or declaration changes require regeneration.
 
 ## Refreshing the snapshot
 
@@ -76,11 +81,18 @@ captured, and each task's version; a test asserts it still agrees with the files
 
 ## Decisions
 
-**One artifact, `engine.pyi`, not `__init__.pyi`.** A stub for the package's `__init__`
+**One definition of each client, in `engine.pyi`.** A stub for the compute package's `__init__`
 would declare a *second* `ComputeClient` that has nothing to do with
 `evo.compute.engine.ComputeClient`, so the two would disagree depending on how the class
 was imported. Stubbing the module that defines the class keeps one type, and
 `evo/compute/__init__.py` re-exports it as it already does.
+
+**Imported tasks are instances, not generated classes.** Every runtime task handle uses one
+shared implementation. `_facade_types.pyi` describes task-specific calls and result types;
+task-package stubs declare exported instances and retain the legacy imports and `run()` API.
+No per-task implementation module is emitted. Existing acronym names such as `IDW` are retained.
+Models and mappings are supported alongside typed named-argument calls. Imports do not depend
+on a manager; live tasks absent from the index remain runnable with `task(topic, name)`.
 
 **The stub does not declare `__getattr__`.** It could, and then every attribute would
 type-check — including typos. Leaving it out is what makes an unknown task a static error.
@@ -120,6 +132,15 @@ prefix so an input and an output that share a schema title stay distinct. Within
 structurally identical objects collapse onto one type — the published schemas inline the
 same filter shape at four different depths. Only shapes with the same base collapse, so an
 input `TypedDict` is never reused for a result that has to hydrate.
+
+**The blocking client gets its own result tree, but shares the parameters.** What differs
+between `ComputeClient` and `SyncComputeClient` is whether `run(...)` and the loaders below
+the result are coroutines, so the result classes are generated a second time as
+`Sync<Task>Result...` rooted in `SyncTaskResult` / `SyncResultNode`. The parameter types
+are identical and are emitted once; the blocking pass reuses them verbatim. Declaring the
+blocking result as the awaited one would have left `result.target.load()` typed as a
+coroutine, which is the one thing the two entry points do not agree on —
+`usage_bad.py::awaited_blocking_result` pins that.
 
 ## The runtime half
 

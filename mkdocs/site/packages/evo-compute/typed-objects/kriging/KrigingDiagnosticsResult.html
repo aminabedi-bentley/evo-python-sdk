@@ -8,7 +8,7 @@
         
         
         <link rel="shortcut icon" href="../../../../img/favicon.ico">
-        <title>BreakTiesParameters - Evo Python SDK</title>
+        <title>KrigingDiagnosticsResult - Evo Python SDK</title>
         <link href="../../../../css/bootstrap.min.css" rel="stylesheet">
         <link href="../../../../css/fontawesome.min.css" rel="stylesheet">
         <link href="../../../../css/brands.min.css" rel="stylesheet">
@@ -34,12 +34,12 @@
 
                     <ul class="nav navbar-nav ms-md-auto">
                             <li class="nav-item">
-                                <a rel="prev" href="../../SyncComputeClient.html" class="nav-link">
+                                <a rel="prev" href="KrigingDiagnostics.html" class="nav-link">
                                     <i class="fa fa-arrow-left"></i> Previous
                                 </a>
                             </li>
                             <li class="nav-item">
-                                <a rel="next" href="BreakTiesResult.html" class="nav-link">
+                                <a rel="next" href="KrigingMethod.html" class="nav-link">
                                     Next <i class="fa fa-arrow-right"></i>
                                 </a>
                             </li>
@@ -61,7 +61,7 @@
     <div id="toc-collapse" class="navbar-collapse collapse card bg-body-tertiary">
         <ul class="nav flex-column">
             
-            <li class="nav-item" data-bs-level="2"><a href="#evo.compute.tasks.geostatistics.break_ties.BreakTiesParameters" class="nav-link">BreakTiesParameters</a>
+            <li class="nav-item" data-bs-level="2"><a href="#evo.compute.tasks.geostatistics.kriging.KrigingDiagnosticsResult" class="nav-link">KrigingDiagnosticsResult</a>
               <ul class="nav flex-column">
               </ul>
             </li>
@@ -70,7 +70,7 @@
 </div></div>
                     <div class="col-md-9" role="main">
 
-<p><a href="https://github.com/SeequentEvo/evo-python-sdk/blob/main/packages/evo-compute/src/evo/compute/tasks/geostatistics/break_ties.py">GitHub source</a>
+<p><a href="https://github.com/SeequentEvo/evo-python-sdk/blob/main/packages/evo-compute/src/evo/compute/tasks/geostatistics/kriging.py">GitHub source</a>
 </p>
 
 
@@ -78,8 +78,8 @@
 
 
 
-<h2 id="evo.compute.tasks.geostatistics.break_ties.BreakTiesParameters" class="doc doc-heading">
-            <span class="doc doc-object-name doc-class-name">evo.compute.tasks.geostatistics.break_ties.BreakTiesParameters</span>
+<h2 id="evo.compute.tasks.geostatistics.kriging.KrigingDiagnosticsResult" class="doc doc-heading">
+            <span class="doc doc-object-name doc-class-name">evo.compute.tasks.geostatistics.kriging.KrigingDiagnosticsResult</span>
 
 
 </h2>
@@ -89,21 +89,8 @@
 
 
 
-        <p>Parameters for the break-ties task.</p>
-<p>Defines all inputs needed to run a break-ties spatial tie-breaking task.</p>
-<p>Example:
-    &gt;&gt;&gt; from evo.compute.tasks import run, SearchNeighborhood, Ellipsoid, EllipsoidRanges, Target
-    &gt;&gt;&gt; from evo.compute.tasks.geostatistics.break_ties import BreakTiesParameters
-    &gt;&gt;&gt;
-    &gt;&gt;&gt; params = BreakTiesParameters(
-    ...     source=pointset.attributes["grade"],
-    ...     target=Target.new_attribute(pointset, "grade_tiebroken"),
-    ...     neighborhood=SearchNeighborhood(
-    ...         ellipsoid=Ellipsoid(ranges=EllipsoidRanges(200, 150, 100)),
-    ...         max_samples=20,
-    ...     ),
-    ... )
-    &gt;&gt;&gt; result = await run(manager, params)</p>
+        <p>The diagnostic attributes that were written alongside the kriging estimate.</p>
+<p>Diagnostics that were not requested come back as <code>None</code>.</p>
 
 
 
@@ -122,88 +109,6 @@
 
 
 
-
-<div class="doc doc-object doc-attribute">
-
-
-
-<h3 id="evo.compute.tasks.geostatistics.break_ties.BreakTiesParameters.source" class="doc doc-heading">
-            <span class="doc doc-object-name doc-attribute-name">source</span>
-
-
-</h3>
-<div class="doc-signature highlight"><pre><span></span><code><span class="n">source</span><span class="p">:</span> <span class="n">AnySourceAttribute</span>
-</code></pre></div>
-
-    <div class="doc doc-contents ">
-
-        <p>The source object and attribute containing values in which ties will be broken.</p>
-
-    </div>
-
-</div>
-
-<div class="doc doc-object doc-attribute">
-
-
-
-<h3 id="evo.compute.tasks.geostatistics.break_ties.BreakTiesParameters.target" class="doc doc-heading">
-            <span class="doc doc-object-name doc-attribute-name">target</span>
-
-
-</h3>
-<div class="doc-signature highlight"><pre><span></span><code><span class="n">target</span><span class="p">:</span> <span class="n">AnyTargetAttribute</span>
-</code></pre></div>
-
-    <div class="doc doc-contents ">
-
-        <p>The target object and attribute to create or update with tie-broken results.</p>
-
-    </div>
-
-</div>
-
-<div class="doc doc-object doc-attribute">
-
-
-
-<h3 id="evo.compute.tasks.geostatistics.break_ties.BreakTiesParameters.neighborhood" class="doc doc-heading">
-            <span class="doc doc-object-name doc-attribute-name">neighborhood</span>
-
-
-</h3>
-<div class="doc-signature highlight"><pre><span></span><code><span class="n">neighborhood</span><span class="p">:</span> <span class="n">SearchNeighborhood</span>
-</code></pre></div>
-
-    <div class="doc doc-contents ">
-
-        <p>Search neighborhood parameters.</p>
-<p>In this break-ties algorithm, the final value of each tied point is influenced
-by the mean of nearby points. The search parameters determine which nearby points to use.</p>
-
-    </div>
-
-</div>
-
-<div class="doc doc-object doc-attribute">
-
-
-
-<h3 id="evo.compute.tasks.geostatistics.break_ties.BreakTiesParameters.seed" class="doc doc-heading">
-            <span class="doc doc-object-name doc-attribute-name">seed</span>
-
-
-</h3>
-<div class="doc-signature highlight"><pre><span></span><code><span class="n">seed</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">38239342</span>
-</code></pre></div>
-
-    <div class="doc doc-contents ">
-
-        <p>Seed for the random number generator.</p>
-
-    </div>
-
-</div>
 
 
 

@@ -17,8 +17,11 @@ than a pile of broken code.
 """
 
 from evo.common import IContext
+from pydantic import BaseModel
 
-from evo.compute import ComputeClient
+from evo.compute import ComputeClient, SyncComputeClient
+from evo.compute.tasks import NormalScoreGcp
+from evo.compute.tasks.geostatistics import Declustering
 
 EXPECTED_ERRORS = [
     "geology",  # topic that is not in the catalogue snapshot
@@ -28,7 +31,51 @@ EXPECTED_ERRORS = [
     "power",  # wrong scalar type
     "method",  # value outside the schema's enum
     "upper_case",  # result attribute used as something other than the type it declares
+    "await",  # blocking client's result awaited as though it were the async one's
+    {"mypy": "facade_typo", "pyright": 'No overloads for "run"'},
+    "facade_method",
+    "NotANeighborhood",
 ]
+
+
+class NotANeighborhood(BaseModel):
+    value: str
+
+
+async def unrelated_neighborhood_model_async(context: IContext) -> None:
+    client = ComputeClient(context)
+    await client.geostatistics.declustering.run(
+        source="https://example.com/objects/samples",
+        grid="https://example.com/objects/grid",
+        target={"object": "https://example.com/objects/target", "attribute": "weights"},
+        neighborhood=NotANeighborhood(value="invalid"),
+    )
+
+
+def unrelated_neighborhood_model_blocking(context: IContext) -> None:
+    Declustering.run(
+        context,
+        source="https://example.com/objects/samples",
+        grid="https://example.com/objects/grid",
+        target={"object": "https://example.com/objects/target", "attribute": "weights"},
+        neighborhood=NotANeighborhood(value="invalid"),
+    )
+
+
+async def malformed_neighborhood_dictionary(context: IContext) -> None:
+    client = ComputeClient(context)
+    await client.geostatistics.declustering.run(
+        source="https://example.com/objects/samples",
+        grid="https://example.com/objects/grid",
+        target={"object": "https://example.com/objects/target", "attribute": "weights"},
+        neighborhood={
+            "ellipsoid": {
+                "ellipsoid_ranges": {"major": 200.0, "semi_major": 150.0, "minor": 100.0},
+                "rotation": {"dip_azimuth": 45.0, "dip": 10.0, "pitch": 5.0},
+            },
+            "max_samples": "invalid",
+        },
+    )
 
 
 async def unknown_topic(context: IContext) -> None:
@@ -122,3 +169,46 @@ async def misused_result_attribute(context: IContext) -> None:
         },
     )
     print(result.target.attribute.name.upper_case())
+
+
+async def awaited_blocking_result(context: IContext) -> None:
+    """The blocking client has already done the waiting; there is nothing left to await."""
+    client = SyncComputeClient(context)
+    result = client.geostatistics.normal_score_gcp.run(
+        method="forward",
+        source={"object": "https://example.com/objects/samples", "attribute": "grade"},
+        distribution="https://example.com/objects/distribution",
+        target={
+            "object": "https://example.com/objects/samples",
+            "attribute": {"operation": "create", "name": "grade_ns"},
+        },
+    )
+    await result.target.load()
+
+
+def misspelled_imported_task_parameter(context: IContext) -> None:
+    NormalScoreGcp.run(
+        context,
+        method="forward",
+        source={"object": "https://example.com/objects/samples", "attribute": "grade"},
+        distribution="https://example.com/objects/distribution",
+        target={
+            "object": "https://example.com/objects/samples",
+            "attribute": {"operation": "create", "name": "grade_ns"},
+        },
+        facade_typo=True,
+    )
+
+
+def misused_imported_task_result(context: IContext) -> None:
+    result = NormalScoreGcp.run(
+        context,
+        method="forward",
+        source={"object": "https://example.com/objects/samples", "attribute": "grade"},
+        distribution="https://example.com/objects/distribution",
+        target={
+            "object": "https://example.com/objects/samples",
+            "attribute": {"operation": "create", "name": "grade_ns"},
+        },
+    )
+    print(result.target.attribute.name.facade_method())

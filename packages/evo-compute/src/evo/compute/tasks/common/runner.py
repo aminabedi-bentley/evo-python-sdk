@@ -118,6 +118,10 @@ class TaskRegistry:
         """
         return self._runners.get(param_type)
 
+    def registered_runners(self) -> tuple[type[TaskRunner[Any, Any, Any]], ...]:
+        """Return a snapshot of registered runners for task metadata discovery."""
+        return tuple(self._runners.values())
+
     def get_runner_for_params(self, params: TParams) -> type[TaskRunner[TParams, TResultModel, TResult]]:
         """Get the TaskRunner subclass for a parameter instance.
 
