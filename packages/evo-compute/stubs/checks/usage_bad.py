@@ -33,6 +33,11 @@ EXPECTED_ERRORS = [
     {"mypy": "facade_typo", "pyright": 'No overloads for "run"'},
     "facade_method",
     "NotANeighborhood",
+    "declustering_weight",  # submitted job read as though it were the result
+    "title_case",  # a submitted job's result attribute used as something other than its type
+    "swap_case",  # the same through the blocking client's job
+    "facade_job_typo",
+    {"mypy": 'has no attribute "submit"', "pyright": 'Cannot access attribute "submit"'},
 ]
 
 
@@ -200,3 +205,80 @@ def misused_imported_task_result(context: IContext) -> None:
         },
     )
     print(result.target.attribute.name.facade_method())
+
+
+async def submitted_job_read_as_a_result(context: IContext) -> None:
+    """``submit`` hands back the job, not what it will produce.
+
+    A result node carries ``__getattr__``, so any name reads off it; a job deliberately does
+    not, which is what keeps the two from being confused for one another.
+    """
+    client = ComputeClient(context)
+    job = await client.geostatistics.declustering.submit(
+        source={"object": "https://example.com/objects/samples"},
+        grid={"object": "https://example.com/objects/grid"},
+        target={
+            "object": "https://example.com/objects/samples",
+            "attribute": {"operation": "create", "name": "declustering_weight"},
+        },
+        neighborhood={
+            "ellipsoid": {
+                "ellipsoid_ranges": {"major": 100.0, "semi_major": 100.0, "minor": 50.0},
+                "rotation": {},
+            },
+            "max_samples": 20,
+        },
+        power=2.0,
+    )
+    print(job.declustering_weight)
+
+
+async def misused_result_of_a_submitted_job(context: IContext) -> None:
+    """Waiting on the job yields the same typed result ``run`` returns, so the same mistake is caught."""
+    client = ComputeClient(context)
+    job = await client.geostatistics.normal_score.submit(
+        method="forward",
+        source={"object": "https://example.com/objects/samples", "attribute": "grade"},
+        distribution="https://example.com/objects/distribution",
+        target={
+            "object": "https://example.com/objects/samples",
+            "attribute": {"operation": "create", "name": "grade_ns"},
+        },
+    )
+    result = await job.results()
+    print(result.target.attribute.name.title_case())
+
+
+def misused_result_of_a_blocking_submitted_job(context: IContext) -> None:
+    client = SyncComputeClient(context)
+    job = client.geostatistics.normal_score.submit(
+        method="forward",
+        source={"object": "https://example.com/objects/samples", "attribute": "grade"},
+        distribution="https://example.com/objects/distribution",
+        target={
+            "object": "https://example.com/objects/samples",
+            "attribute": {"operation": "create", "name": "grade_ns"},
+        },
+    )
+    print(job.results().target.attribute.name.swap_case())
+
+
+async def misused_imported_job_result(context: IContext) -> None:
+    job = await NormalScore.asubmit(
+        context,
+        method="forward",
+        source={"object": "https://example.com/objects/samples", "attribute": "grade"},
+        distribution="https://example.com/objects/distribution",
+        target={
+            "object": "https://example.com/objects/samples",
+            "attribute": {"operation": "create", "name": "grade_ns"},
+        },
+    )
+    result = await job.results()
+    result.target.attribute.name.facade_job_typo()
+
+
+def unavailable_imported_bespoke_submission(context: IContext) -> None:
+    from evo.compute.tasks.geostatistics import Kriging
+
+    Kriging.submit(context)

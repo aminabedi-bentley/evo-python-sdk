@@ -135,6 +135,11 @@ The positional parameter-model overload preserves native fields at runtime, whil
 arguments and dictionary overloads describe the bespoke argument contract. Both facade calls
 return the same handwritten result type; blocking submission does not change its async loaders.
 
+Generic imported handles also describe `.submit()` and `.asubmit()` as
+`SyncTaskJob[<BlockingResult>]` and `TaskJob[<AsyncResult>]`. Their result types stay concrete
+through `job.results()`. Run-only bespoke handles omit those methods from their hints, matching
+the selected runner's capabilities; the runtime rejects an unsupported submission explicitly.
+
 **Overrides are enumerated from the package, not from the snapshot.** An override is a
 decision made in code: it claims whatever the platform advertises under that name, so it has
 to be describable whether or not a snapshot mentions the task. Driving it from the catalogue

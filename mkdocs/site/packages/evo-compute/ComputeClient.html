@@ -195,6 +195,26 @@ the guard that catches an object the task cannot read.</p>
                   <code>None</code>
             </td>
           </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>fb</code>
+            </td>
+            <td>
+                  <code><span title="evo.common.interfaces.IFeedback">IFeedback</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Where every job this client submits reports its progress while it is waited
+on. Set here rather than per call because the namespace forwards its keywords to
+the task's own schema, so there is nowhere in <code>run(...)</code> for an engine-level
+argument to live that would not also take a name away from every task.
+:meth:<code>~evo.compute.jobs.TaskJob.results</code> overrides it for one wait.</p>
+              </div>
+            </td>
+            <td>
+                  <code><span title="evo.common.utils.NoFeedback">NoFeedback</span></code>
+            </td>
+          </tr>
       </tbody>
     </table>
 
@@ -268,7 +288,10 @@ the guard that catches an object the task cannot read.</p>
 
     <div class="doc doc-contents ">
 
-        <p>Discover the task (cached), resolve and validate the parameters, submit, and hydrate the results.</p>
+        <p>Submit the task and wait for it, hydrating the results it returned.</p>
+<p>:meth:<code>asubmit</code> does the work; this waits on what it hands back, with the client's
+own feedback and the default polling. Take the job instead when the wait itself
+matters -- to report progress elsewhere, to poll, or to cancel.</p>
 
 
 <p><span class="doc-section-title">Parameters:</span></p>
@@ -332,6 +355,131 @@ Falls back to <code>validate</code> when neither is set.</p>
             </td>
             <td>
                   <code>None</code>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="evo.compute.engine.ComputeClient.asubmit" class="doc doc-heading">
+            <span class="doc doc-object-name doc-function-name">asubmit</span>
+
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-async"><code>async</code></small>
+  </span>
+
+</h3>
+<div class="doc-signature highlight"><pre><span></span><code><span class="nf">asubmit</span><span class="p">(</span>
+    <span class="n">topic</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
+    <span class="n">task</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
+    <span class="n">parameters</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">],</span>
+    <span class="o">*</span><span class="p">,</span>
+    <span class="n">validate</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+    <span class="n">deep_validation</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+    <span class="n">check_schemas</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="n">TaskJob</span><span class="p">[</span><span class="n">TaskResult</span><span class="p">]</span>
+</code></pre></div>
+
+    <div class="doc doc-contents ">
+
+        <p>Discover the task (cached), resolve and validate the parameters, and submit.</p>
+<p>Everything :meth:<code>arun</code> does except the waiting, which is left to the caller
+through the returned handle.</p>
+
+
+<p><span class="doc-section-title">Parameters:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Type</th>
+          <th>Description</th>
+          <th>Default</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                <code>validate</code>
+            </td>
+            <td>
+                  <code><span title="bool">bool</span> | None</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Override the client's schema-validation setting for this call.
+<code>False</code> skips deep validation too, but never the signature binding that
+builds the payload.</p>
+              </div>
+            </td>
+            <td>
+                  <code>None</code>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>deep_validation</code>
+            </td>
+            <td>
+                  <code><span title="bool">bool</span> | None</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Override the client's deep-validation setting for this call.
+Only consulted when validation is enabled.</p>
+              </div>
+            </td>
+            <td>
+                  <code>None</code>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>check_schemas</code>
+            </td>
+            <td>
+                  <code><span title="bool">bool</span> | None</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Override the client's supported-schema setting for this call.
+Falls back to <code>validate</code> when neither is set.</p>
+              </div>
+            </td>
+            <td>
+                  <code>None</code>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+    <p><span class="doc-section-title">Returns:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="evo.compute.jobs.TaskJob">TaskJob</span>[<span title="evo.compute.outputs.TaskResult">TaskResult</span>]</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>A handle on the accepted job, carrying the task's <code>results</code> schema so
+the payload is hydrated the same way either path reaches it.</p>
+              </div>
             </td>
           </tr>
       </tbody>
