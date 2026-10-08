@@ -1,8 +1,8 @@
 {
   "limit": 100,
   "offset": 0,
-  "total": 4,
-  "count": 4,
+  "total": 5,
+  "count": 5,
   "results": [
     {
       "key": "geostatistics/declustering",
@@ -14,31 +14,69 @@
       "parameters": {
         "type": "object",
         "properties": {
-          "source": {"type": "string", "format": "uri", "reference_to": "geoscience-object"},
-          "power": {"type": ["number", "null"], "default": null},
-          "method": {"type": "string", "enum": ["cell", "polygon"], "default": "cell"},
-          "settings": {"type": "object"},
-          "options": {"default": null}
+          "source": {
+            "type": "string",
+            "format": "uri",
+            "reference_to": "geoscience-object"
+          },
+          "power": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "default": null
+          },
+          "method": {
+            "type": "string",
+            "enum": [
+              "cell",
+              "polygon"
+            ],
+            "default": "cell"
+          },
+          "settings": {
+            "type": "object"
+          },
+          "options": {
+            "default": null
+          }
         },
-        "required": ["source"]
+        "required": [
+          "source"
+        ]
       },
       "results": {
         "type": "object",
         "properties": {
-          "message": {"type": "string"},
+          "message": {
+            "type": "string"
+          },
           "target": {
             "type": "object",
             "output": "geoscience-object",
             "properties": {
-              "reference": {"type": "string", "format": "uri", "reference_to": "geoscience-object"},
-              "name": {"type": "string"},
-              "schema_id": {"type": "string"},
+              "reference": {
+                "type": "string",
+                "format": "uri",
+                "reference_to": "geoscience-object"
+              },
+              "name": {
+                "type": "string"
+              },
+              "schema_id": {
+                "type": "string"
+              },
               "attribute": {
                 "type": "object",
                 "output": "attribute",
                 "properties": {
-                  "reference": {"type": "string", "reference_to": "attribute"},
-                  "name": {"type": "string"}
+                  "reference": {
+                    "type": "string",
+                    "reference_to": "attribute"
+                  },
+                  "name": {
+                    "type": "string"
+                  }
                 }
               }
             }
@@ -56,9 +94,15 @@
       "parameters": {
         "type": "object",
         "properties": {
-          "distribution": {"type": "string", "format": "uri", "reference_to": "geoscience-object"}
+          "distribution": {
+            "type": "string",
+            "format": "uri",
+            "reference_to": "geoscience-object"
+          }
         },
-        "required": ["distribution"]
+        "required": [
+          "distribution"
+        ]
       }
     },
     {
@@ -72,11 +116,27 @@
       "parameters": {
         "type": "object",
         "properties": {
-          "source": {"type": "string", "format": "uri", "reference_to": "geoscience-object"},
-          "target": {"type": "string", "format": "uri", "reference_to": "geoscience-object"},
-          "variogram": {"type": "string", "format": "uri", "reference_to": "geoscience-object"}
+          "source": {
+            "type": "string",
+            "format": "uri",
+            "reference_to": "geoscience-object"
+          },
+          "target": {
+            "type": "string",
+            "format": "uri",
+            "reference_to": "geoscience-object"
+          },
+          "variogram": {
+            "type": "string",
+            "format": "uri",
+            "reference_to": "geoscience-object"
+          }
         },
-        "required": ["source", "target", "variogram"]
+        "required": [
+          "source",
+          "target",
+          "variogram"
+        ]
       }
     },
     {
@@ -90,9 +150,37 @@
       "parameters": {
         "type": "object",
         "properties": {
-          "file": {"type": "string", "reference_to": "file"}
+          "file": {
+            "type": "string",
+            "reference_to": "file"
+          }
         },
-        "required": ["file"]
+        "required": [
+          "file"
+        ]
+      }
+    },
+    {
+      "key": "vis-service/tiling",
+      "topic": "vis-service",
+      "name": "tiling",
+      "display_name": "Tiling",
+      "version": "0.1.0",
+      "description": "A hyphenated topic publishing a hyphenated parameter, as the real catalogue does.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "object_url": {
+            "type": "string"
+          },
+          "s2s-user-info": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "object_url",
+          "s2s-user-info"
+        ]
       }
     }
   ]

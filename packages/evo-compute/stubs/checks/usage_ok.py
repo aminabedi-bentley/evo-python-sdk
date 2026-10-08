@@ -17,11 +17,13 @@ let ``tests/test_stubgen.py`` do it when the checker is installed.
 
 from evo.common import IContext
 from evo.objects.typed import Attribute, BaseObject, PendingAttribute
+from typing_extensions import assert_type
 
 from evo.compute import ComputeClient, SyncComputeClient
-from evo.compute.tasks import NormalScoreGcp
+from evo.compute.tasks import NormalScore
 from evo.compute.tasks.common import Ellipsoid, EllipsoidRanges, Rotation, SearchNeighborhood
-from evo.compute.tasks.geostatistics import Declustering
+from evo.compute.tasks.geostatistics import Declustering, Kriging
+from evo.compute.tasks.geostatistics.kriging import KrigingMethod, KrigingParameters, KrigingResult
 
 
 def _model_neighborhood() -> SearchNeighborhood:
@@ -110,7 +112,7 @@ async def declustering(context: IContext) -> None:
 
 async def normal_score(context: IContext) -> None:
     client = ComputeClient(context)
-    await client.geostatistics.normal_score_gcp.run(
+    await client.geostatistics.normal_score.run(
         method="forward",
         source={
             "object": "https://example.com/objects/samples",
@@ -129,6 +131,23 @@ async def not_in_the_snapshot(context: IContext) -> None:
     client = ComputeClient(context)
     result: dict = await client.arun("geostatistics", "some-new-task", {"source": "..."})
     print(result)
+
+
+async def a_topic_the_snapshot_has_never_seen(context: IContext) -> None:
+    """Execution is live; hints are point-in-time. An unlisted name is untyped, not wrong.
+
+    The catalogue is per-organization and moves between SDK releases, so the snapshot is
+    never all of it. These calls reach the engine exactly as a snapshotted task does; the
+    only thing missing is the parameter and result types.
+    """
+    client = ComputeClient(context)
+    await client.geology.some_task.run(anything=1)
+    await client.geostatistics.a_task_added_last_week.run(source="...")
+
+
+def a_topic_the_snapshot_has_never_seen_without_await(context: IContext) -> None:
+    client = SyncComputeClient(context)
+    client.geology.some_task.run(anything=1)
 
 
 async def typed_handles(context: IContext, pointset: BaseObject, weights: PendingAttribute) -> None:
@@ -153,21 +172,44 @@ async def typed_handles(context: IContext, pointset: BaseObject, weights: Pendin
     )
 
 
-async def typed_attribute_source(context: IContext, grade: Attribute, target: BaseObject) -> None:
+async def typed_attribute_source(context: IContext, grade: Attribute, kriged: PendingAttribute) -> None:
+    """``kriging`` has an override, so the surface here is the runner's own, not the schema's.
+
+    That is the point of one: the arguments are the SDK's (``search``, ``method``) and they
+    take the typed models and handles rather than the wire shapes.
+    """
     client = ComputeClient(context)
-    await client.geostatistics.kriging_gcp.run(
+    await client.geostatistics.kriging.run(
         source=grade,
-        target={"object": target, "attribute": "kriged_grade"},
-        kriging_method={"type": "ordinary"},
+        target=kriged,
         variogram="https://example.com/objects/variogram",
-        neighborhood={
-            "ellipsoid": {
-                "ellipsoid_ranges": {"major": 100.0, "semi_major": 100.0, "minor": 50.0},
-                "rotation": {"dip_azimuth": 0.0, "dip": 0.0, "pitch": 0.0},
-            },
-            "max_samples": 20,
-        },
+        search=SearchNeighborhood(
+            ellipsoid=Ellipsoid(ranges=EllipsoidRanges(major=100.0, semi_major=100.0, minor=50.0)),
+            max_samples=20,
+        ),
+        method=KrigingMethod.ORDINARY,
     )
+
+
+def overridden_task_without_await(context: IContext, grade: Attribute, kriged: PendingAttribute) -> None:
+    """An override reached through the blocking client keeps its own arguments and result.
+
+    Only the call is unwrapped: ``run`` hands back the runner's ``KrigingResult`` directly
+    rather than a coroutine. That result is the hand-written one, so its own members are
+    still awaited -- ``run_sync`` is there for those.
+    """
+    client = SyncComputeClient(context)
+    result = client.geostatistics.kriging.run(
+        source=grade,
+        target=kriged,
+        variogram="https://example.com/objects/variogram",
+        search=SearchNeighborhood(
+            ellipsoid=Ellipsoid(ranges=EllipsoidRanges(major=100.0, semi_major=100.0, minor=50.0)),
+            max_samples=20,
+        ),
+        method=KrigingMethod.ORDINARY,
+    )
+    print(result.target_name, result.attribute_name)
 
 
 def declustering_without_await(context: IContext) -> None:
@@ -206,7 +248,7 @@ def not_in_the_snapshot_without_await(context: IContext) -> None:
 
 
 async def imported_task_async(context: IContext) -> None:
-    result = await NormalScoreGcp.arun(
+    result = await NormalScore.arun(
         context,
         method="forward",
         source={"object": "https://example.com/objects/samples", "attribute": "grade"},
@@ -222,7 +264,7 @@ async def imported_task_async(context: IContext) -> None:
 
 
 def imported_task_blocking(context: IContext) -> None:
-    result = NormalScoreGcp.run(
+    result = NormalScore.run(
         context,
         {
             "method": "forward",
@@ -238,3 +280,24 @@ def imported_task_blocking(context: IContext) -> None:
     name: str = result.target.attribute.name
     print(name)
     result.target.load()
+
+
+def imported_bespoke_model(context: IContext, parameters: KrigingParameters) -> KrigingResult:
+    return assert_type(Kriging.run(context, parameters, preview=True), KrigingResult)
+
+
+async def imported_bespoke_arguments(context: IContext, grade: Attribute, kriged: PendingAttribute) -> None:
+    result = await Kriging.arun(
+        context,
+        source=grade,
+        target=kriged,
+        variogram="https://example.com/objects/variogram",
+        search=SearchNeighborhood(
+            ellipsoid=Ellipsoid(ranges=EllipsoidRanges(major=100.0, semi_major=100.0, minor=50.0)),
+            max_samples=20,
+        ),
+        method=KrigingMethod.ORDINARY,
+    )
+    assert_type(result, KrigingResult)
+    print(result.target_name, result.attribute_name)
+    await result.get_target_object()

@@ -20,12 +20,10 @@ from evo.common import IContext
 from pydantic import BaseModel
 
 from evo.compute import ComputeClient, SyncComputeClient
-from evo.compute.tasks import NormalScoreGcp
+from evo.compute.tasks import NormalScore
 from evo.compute.tasks.geostatistics import Declustering
 
 EXPECTED_ERRORS = [
-    "geology",  # topic that is not in the catalogue snapshot
-    "made_up_task",  # task that is not in the catalogue snapshot
     "neighborhood",  # required parameter omitted
     "sourse",  # misspelled parameter
     "power",  # wrong scalar type
@@ -76,16 +74,6 @@ async def malformed_neighborhood_dictionary(context: IContext) -> None:
             "max_samples": "invalid",
         },
     )
-
-
-async def unknown_topic(context: IContext) -> None:
-    client = ComputeClient(context)
-    await client.geology.declustering.run()
-
-
-async def unknown_task(context: IContext) -> None:
-    client = ComputeClient(context)
-    await client.geostatistics.made_up_task.run()
 
 
 async def missing_required_parameter(context: IContext) -> None:
@@ -141,7 +129,7 @@ async def wrong_scalar_type(context: IContext) -> None:
 
 async def value_outside_the_enum(context: IContext) -> None:
     client = ComputeClient(context)
-    await client.geostatistics.normal_score_gcp.run(
+    await client.geostatistics.normal_score.run(
         method="sideways",
         source={"object": "https://example.com/objects/samples", "attribute": "grade"},
         distribution="https://example.com/objects/distribution",
@@ -159,7 +147,7 @@ async def misused_result_attribute(context: IContext) -> None:
     their real types all the way down, which is what this checks.
     """
     client = ComputeClient(context)
-    result = await client.geostatistics.normal_score_gcp.run(
+    result = await client.geostatistics.normal_score.run(
         method="forward",
         source={"object": "https://example.com/objects/samples", "attribute": "grade"},
         distribution="https://example.com/objects/distribution",
@@ -174,7 +162,7 @@ async def misused_result_attribute(context: IContext) -> None:
 async def awaited_blocking_result(context: IContext) -> None:
     """The blocking client has already done the waiting; there is nothing left to await."""
     client = SyncComputeClient(context)
-    result = client.geostatistics.normal_score_gcp.run(
+    result = client.geostatistics.normal_score.run(
         method="forward",
         source={"object": "https://example.com/objects/samples", "attribute": "grade"},
         distribution="https://example.com/objects/distribution",
@@ -187,7 +175,7 @@ async def awaited_blocking_result(context: IContext) -> None:
 
 
 def misspelled_imported_task_parameter(context: IContext) -> None:
-    NormalScoreGcp.run(
+    NormalScore.run(
         context,
         method="forward",
         source={"object": "https://example.com/objects/samples", "attribute": "grade"},
@@ -201,7 +189,7 @@ def misspelled_imported_task_parameter(context: IContext) -> None:
 
 
 def misused_imported_task_result(context: IContext) -> None:
-    result = NormalScoreGcp.run(
+    result = NormalScore.run(
         context,
         method="forward",
         source={"object": "https://example.com/objects/samples", "attribute": "grade"},

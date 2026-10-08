@@ -138,8 +138,9 @@ class BehaviorParityTestCase(IsolatedAsyncioTestCase):
         return lambda: runner_cls(self.context, runner_cls.params_type(**inputs))
 
     def _engine_call(self, runner_cls, inputs: dict[str, Any]):
-        task = getattr(self.client.geostatistics, runner_cls.task.replace("-", "_"))
-        return lambda: task.run(**inputs)
+        # `arun`, not attribute access: what is under comparison is the generic path, and an
+        # override deliberately shadows the namespace for its own task.
+        return lambda: self.client.arun("geostatistics", runner_cls.task, inputs)
 
     def _catalogue(self, runner_cls):
         """Serve the engine the task's schema, derived from the runner's own parameter model."""

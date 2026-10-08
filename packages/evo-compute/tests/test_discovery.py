@@ -109,7 +109,7 @@ class TestDiscoveryClient(TestWithConnector):
         with self.set_discovery_response():
             tasks = await self.client.list_tasks()
         names = {task.name for task in tasks}
-        self.assertEqual({"declustering", "normal-score-gcp", "kriging-gcp", "obj-import"}, names)
+        self.assertEqual({"declustering", "normal-score-gcp", "kriging-gcp", "obj-import", "tiling"}, names)
 
     # -- pagination -------------------------------------------------------- #
 
@@ -220,7 +220,7 @@ class TestDiscoveryClient(TestWithConnector):
     async def test_get_topics(self) -> None:
         with self.set_discovery_response():
             topics = await self.client.get_topics()
-        self.assertEqual(["converter", "geostatistics"], topics)
+        self.assertEqual(["converter", "geostatistics", "vis-service"], topics)
 
     async def test_get_topic_tasks(self) -> None:
         with self.set_discovery_response():

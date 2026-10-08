@@ -113,14 +113,25 @@ def _client_for(context: IContext, *, blocking: bool) -> Any:
 
 
 def _parameters(
-    parameters: Mapping[str, Any] | BaseModel | None, named: dict[str, Any], preview: bool | None
+    parameters: Mapping[str, Any] | BaseModel | None,
+    named: dict[str, Any],
+    preview: bool | None,
+    *,
+    native: bool = False,
 ) -> dict[str, Any]:
     if parameters is not None and named:
         raise TypeError("Pass a parameter model or mapping, or named task arguments, not both")
     if parameters is None:
         payload = dict(named)
     elif isinstance(parameters, BaseModel):
-        payload = parameters.model_dump(mode="python", by_alias=True, exclude_none=True)
+        if native:
+            payload = {
+                name: value
+                for name in type(parameters).model_fields
+                if (value := getattr(parameters, name)) is not None
+            }
+        else:
+            payload = parameters.model_dump(mode="python", by_alias=True, exclude_none=True)
     elif isinstance(parameters, Mapping):
         payload = dict(parameters)
     else:
@@ -149,9 +160,9 @@ class TaskHandle(Generic[_Run, _Arun]):
         **named: Any,
     ) -> _Run:
         """Run with a compatible context and preserve the blocking client's result contract."""
-        payload = _parameters(parameters, named, preview)
         client = _client_for(context, blocking=True)
         runner = getattr(getattr(client, self.topic), self.task.replace("-", "_"))
+        payload = _parameters(parameters, named, preview, native=getattr(runner, "params_type", None) is not None)
         return cast(_Run, runner.run(**payload))
 
     async def arun(
@@ -164,7 +175,7 @@ class TaskHandle(Generic[_Run, _Arun]):
         **named: Any,
     ) -> _Arun:
         """Run on the caller's event loop with the asynchronous client's result contract."""
-        payload = _parameters(parameters, named, preview)
         client = _client_for(context, blocking=False)
         runner = getattr(getattr(client, self.topic), self.task.replace("-", "_"))
+        payload = _parameters(parameters, named, preview, native=getattr(runner, "params_type", None) is not None)
         return cast(_Arun, await runner.run(**payload))

@@ -1,19 +1,120 @@
 {
+  "converter": {
+    "DetectConverter": "detect-converter",
+    "DgnImport": "dgn-import",
+    "ErsImport": "ers-import",
+    "GeosoftGridImport": "geosoft-grid-import",
+    "GeosoftSurfaceImport": "geosoft-surface-import",
+    "GeosoftVoxelImport": "geosoft-voxel-import",
+    "ImageImport": "image-import",
+    "ObjImport": "obj-import",
+    "ShpImport": "shp-import",
+    "UbcImport": "ubc-import",
+    "VtkImport": "vtk-import",
+    "XyzImport": "xyz-import"
+  },
+  "cpt-to-borehole": {
+    "CptReader": "cpt-reader",
+    "CreateClusters": "create-clusters",
+    "Publish": "publish",
+    "Stratify": "stratify"
+  },
+  "driver": {
+    "DriverGeneralCompute": "driver-general-compute"
+  },
+  "geophysics": {
+    "GravityTerrainCorrection": "gravity-terrain-correction",
+    "Regular2dGridToTrimesh": "regular-2d-grid-to-trimesh"
+  },
   "geostatistics": {
     "BreakTies": "break-ties",
     "ConSim": "consim",
     "ConditionalTurningBands": "conditional-turning-bands",
     "ContinuousDistribution": "continuous-distribution",
     "Declustering": "declustering",
+    "ExperimentalVariogram": "experimental-variogram",
     "IDW": "idw",
     "KNN": "knn",
     "Kriging": "kriging",
-    "KrigingGcp": "kriging-gcp",
     "LocationWise": "location-wise",
     "LossCalculation": "loss-calculation",
     "NormalScore": "normal-score",
-    "NormalScoreGcp": "normal-score-gcp",
     "ProfitCalculation": "profit-calculation",
     "SimulationReport": "simulation-report"
+  },
+  "geotech": {
+    "AddToIntersectedGeometry": "add-to-intersected-geometry",
+    "CalculateMeshQualityHistogram": "calculate-mesh-quality-histogram",
+    "CheckTriangleOrientation": "check-triangle-orientation",
+    "CopyGeologicalModelMeshes": "copy-geological-model-meshes",
+    "CreateCrossSection": "create-cross-section",
+    "CreateGeologicalModelMeshes": "create-geological-model-meshes",
+    "DetectDegenerateTriangles": "detect-degenerate-triangles",
+    "DetectDuplicatePoints": "detect-duplicate-points",
+    "DetectDuplicateTriangles": "detect-duplicate-triangles",
+    "DetectFins": "detect-fins",
+    "DetectHoles": "detect-holes",
+    "DetectNonManifoldEdges": "detect-non-manifold-edges",
+    "DetectNonManifoldVertices": "detect-non-manifold-vertices",
+    "DetectNonPartitioningSurfaces": "detect-non-partitioning-surfaces",
+    "DetectSelfIntersections": "detect-self-intersections",
+    "FillHoles": "fill-holes",
+    "FixSelfIntersections": "fix-self-intersections",
+    "InitAggregateGeomGmm": "init-aggregate-geom-gmm",
+    "LocalRemesh": "local-remesh",
+    "MakeGmmIntoIntersectedGeometry": "make-gmm-into-intersected-geometry",
+    "MakeIntoModelInput": "make-into-model-input",
+    "MarkVolumesForRemoval": "mark-volumes-for-removal",
+    "ParameterizeVolumes": "parameterize-volumes",
+    "Remesh": "remesh",
+    "RemoveTriangles": "remove-triangles",
+    "SubsumeEmbeddedVolumeInGmm": "subsume-embedded-volume-in-gmm",
+    "ValidateGmmAsIntersectedGeometry": "validate-gmm-as-intersected-geometry"
+  },
+  "gtm": {
+    "AddToIntersectedGeometry": "add-to-intersected-geometry",
+    "Clip": "clip",
+    "CreateCrossSection": "create-cross-section",
+    "CreateGeologicalModelMeshes": "create-geological-model-meshes",
+    "DetectDegenerateTris": "detect-degenerate-tris",
+    "DetectDuplicatePoints": "detect-duplicate-points",
+    "DetectDuplicateTris": "detect-duplicate-tris",
+    "DetectFins": "detect-fins",
+    "DetectHoles": "detect-holes",
+    "DetectInconsistentlyOrientedTris": "detect-inconsistently-oriented-tris",
+    "DetectNonManifoldEdges": "detect-non-manifold-edges",
+    "DetectNonManifoldVertices": "detect-non-manifold-vertices",
+    "DetectRedundantSurfaces": "detect-redundant-surfaces",
+    "DetectSelfIntersections": "detect-self-intersections",
+    "FillHoles": "fill-holes",
+    "FixSelfIntersections": "fix-self-intersections",
+    "InitAggregateGeom": "init-aggregate-geom",
+    "Intersect": "intersect",
+    "LocalRemesh": "local-remesh",
+    "MakeGmmIntoIntersectedGeometry": "make-gmm-into-intersected-geometry",
+    "MakeIntoModelInput": "make-into-model-input",
+    "MergePoints": "merge-points",
+    "OrientTris": "orient-tris",
+    "ParameterizeVolumes": "parameterize-volumes",
+    "Remesh": "remesh",
+    "RemoveDegenerateTris": "remove-degenerate-tris",
+    "RemoveTris": "remove-tris",
+    "RemoveUnusedPoints": "remove-unused-points",
+    "Rotate": "rotate",
+    "SplitComponents": "split-components",
+    "SubsumeEmbeddedVolumeInGmm": "subsume-embedded-volume-in-gmm",
+    "Translate": "translate",
+    "UploadMeshData": "upload-mesh-data",
+    "ValidateGmmAsIntersectedGeometry": "validate-gmm-as-intersected-geometry"
+  },
+  "isosurfacing": {
+    "Category": "category",
+    "Numeric": "numeric"
+  },
+  "utilities": {
+    "Compress": "compress"
+  },
+  "vis-service": {
+    "Tiling": "tiling"
   }
 }

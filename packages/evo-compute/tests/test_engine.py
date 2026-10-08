@@ -36,8 +36,6 @@ def _object_url(suffix: str) -> str:
 
 
 SOURCE_URL = _object_url("10")
-TARGET_URL = _object_url("20")
-VARIOGRAM_URL = _object_url("30")
 FILE_URL = "https://unittest.localhost/file/v2/orgs/00000000-0000-0000-0000-000000000001/files/mesh"
 
 
@@ -115,13 +113,33 @@ class TestComputeClient(ComputeClientTestCase):
             await self.client.geostatistics.normal_score_gcp.run(distribution=SOURCE_URL)
         self.assertEqual("normal-score-gcp", submit.await_args.kwargs["task"])
 
+    async def test_hyphenated_topic_names_are_reachable_with_underscores(self) -> None:
+        """``vis_service`` resolves to the platform's ``vis-service``.
+
+        Topics need the same treatment as tasks: the catalogue publishes several hyphenated
+        ones and no attribute access can spell them otherwise.
+        """
+        with self.catalogue_response(), self.mock_job_client() as submit:
+            await self.client.vis_service.tiling.run(object_url=SOURCE_URL, s2s_user_info="{}")
+        self.assertEqual("vis-service", submit.await_args.kwargs["topic"])
+
+    async def test_a_hyphenated_parameter_reaches_the_wire_with_its_published_name(self) -> None:
+        """``s2s_user_info`` is how it is typed; ``s2s-user-info`` is what is sent.
+
+        No keyword can spell the published name, so the engine normalises it like everything
+        else and puts the platform's own spelling back on the payload.
+        """
+        with self.catalogue_response(), self.mock_job_client() as submit:
+            await self.client.vis_service.tiling.run(object_url=SOURCE_URL, s2s_user_info="{}")
+
+        parameters = submit.await_args.kwargs["parameters"]
+        self.assertEqual({"object_url": SOURCE_URL, "s2s-user-info": "{}"}, parameters)
+
     async def test_catalogue_is_cached_across_runs(self) -> None:
         """The catalogue is fetched once and reused for later runs (any task/topic)."""
         with self.catalogue_response(), self.mock_job_client():
             await self.client.geostatistics.declustering.run(source=SOURCE_URL)
-            await self.client.geostatistics.kriging_gcp.run(
-                source=SOURCE_URL, target=TARGET_URL, variogram=VARIOGRAM_URL
-            )
+            await self.client.geostatistics.normal_score_gcp.run(distribution=SOURCE_URL)
         self.assertEqual(1, self.transport.request.call_count)
 
     async def test_catalogue_is_shared_across_topics(self) -> None:
@@ -164,17 +182,13 @@ class TestComputeClient(ComputeClientTestCase):
     async def test_preview_defaults_to_feature_flag(self) -> None:
         """A feature-flagged task opts into preview by default."""
         with self.catalogue_response(), self.mock_job_client() as submit:
-            await self.client.geostatistics.kriging_gcp.run(
-                source=SOURCE_URL, target=TARGET_URL, variogram=VARIOGRAM_URL
-            )
+            await self.client.converter.obj_import.run(file=FILE_URL)
         self.assertTrue(submit.await_args.kwargs["preview"])
 
     async def test_preview_can_be_overridden(self) -> None:
         """An explicit preview flag overrides the feature-flag default."""
         with self.catalogue_response(), self.mock_job_client() as submit:
-            await self.client.geostatistics.kriging_gcp.run(
-                source=SOURCE_URL, target=TARGET_URL, variogram=VARIOGRAM_URL, preview=False
-            )
+            await self.client.converter.obj_import.run(file=FILE_URL, preview=False)
         self.assertFalse(submit.await_args.kwargs["preview"])
         self.assertNotIn("preview", submit.await_args.kwargs["parameters"])
 
