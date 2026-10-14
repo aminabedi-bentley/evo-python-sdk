@@ -11,10 +11,14 @@
 
 """Tests for the compute tasks module imports and basic functionality."""
 
+import ast
 import asyncio
+import importlib.util
 import inspect
 import json
 import unittest
+from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from evo.common.interfaces import IFeedback
@@ -50,6 +54,7 @@ from test_payload_parity import (
     TARGET_URL,
     VARIOGRAM_URL,
     _pending_attribute,
+    _typed_object,
     payload_differences,
 )
 
@@ -684,6 +689,154 @@ class TestNativeFacadeEngineParity(TestWithConnector):
         self.assertNotIn("?", str(results))
         self.assertEqual((1.0, "Completed 3/3"), self.feedback.reports[-1])
         self.assertFalse(any(message == "private job message" for progress, message in self.feedback.reports))
+
+    @unittest.skipUnless(
+        all(importlib.util.find_spec(name) is not None for name in ("IPython", "ipywidgets", "plotly")),
+        "notebook extras are required",
+    )
+    async def test_estimation_engine_notebook_runs_both_workflows(self):
+        import pandas as pd
+        from IPython.core.interactiveshell import InteractiveShell
+
+        path = Path(__file__).resolve().parents[1] / "docs" / "examples" / "estimation_engine.ipynb"
+        notebook = json.loads(path.read_text(encoding="utf-8"))
+        self.assertEqual(45, len(notebook["cells"]))
+        self.assertEqual(45, len({cell["id"] for cell in notebook["cells"]}))
+        native_parameters = self._parameters()
+        expected = {
+            name: parameters.model_dump(mode="json", by_alias=True, exclude_none=True)
+            for name, parameters in zip(("kriging", "idw", "knn"), native_parameters, strict=True)
+        }
+        for parameters in expected.values():
+            ranges = parameters["neighborhood"]["ellipsoid"]["ellipsoid_ranges"]
+            ranges.update({name: float(value) for name, value in ranges.items()})
+        source = SimpleNamespace(
+            attributes={
+                "Cu_pct": native_parameters[0].source,
+                "Geological_model": "locations.attributes[?name=='Geological_model']",
+            },
+            to_dataframe=AsyncMock(
+                return_value=pd.DataFrame(
+                    {"Cu_pct": [0.1, 0.2, 0.3], "Geological_model": ["Early Diorite"] * 3, "IDW declus": [1, 2, 1]}
+                )
+            ),
+        )
+        source.refresh = AsyncMock(return_value=source)
+        frame = pd.DataFrame(
+            {
+                "Cu_KNN": [0.1, 0.2, 0.3],
+                "Cu_IDW": [0.3, 0.5, 0.7],
+                "Cu_OK": [0.2, 0.4, 0.6],
+                "KV": [0.01, 0.02, 0.03],
+                "Geological model": ["Early Diorite"] * 3,
+            }
+        )
+        target = SimpleNamespace(
+            attributes={name: _pending_attribute(name, TARGET_URL) for name in ("Cu_OK", "Cu_IDW", "Cu_KNN")},
+            to_dataframe=AsyncMock(side_effect=lambda *, columns: frame[columns].copy()),
+        )
+        target.attributes.update(
+            {"KV": _pending_attribute("KV", TARGET_URL), "Geological model": "attributes[?name=='Geological model']"}
+        )
+        target.refresh = AsyncMock(return_value=target)
+        variogram = _typed_object(VARIOGRAM_URL)
+        variogram.get_ellipsoid = MagicMock(
+            return_value=Ellipsoid(ranges=EllipsoidRanges(major=100, semi_major=200 / 3, minor=50))
+        )
+        inputs = {
+            "WP comps.json": source,
+            "Cu_pct Variogram Model.json": variogram,
+            "WP Regular BlockModel.json": target,
+        }
+        submitted, started, barriers = [], {}, {}
+
+        async def submit(*, topic, task, parameters, preview, result_type, **kwargs):
+            self.assertEqual("geostatistics", topic)
+            self.assertTrue(preview)
+            self.assertIs(dict, result_type)
+            self.assertEqual([], payload_differences(expected[task], parameters))
+            batch = len(submitted) // 3
+            submitted.append((batch, task))
+            backend = MagicMock(spec=JobClient)
+            backend.topic, backend.task = topic, task
+            backend.id, backend.url = f"{batch}-{task}", f"https://jobs.test/{batch}/{task}"
+
+            async def wait_for_results(**kwargs):
+                started.setdefault(batch, []).append(task)
+                event = barriers.setdefault(batch, asyncio.Event())
+                if len(started[batch]) == 3:
+                    event.set()
+                await asyncio.wait_for(event.wait(), timeout=5)
+                return {
+                    "message": task,
+                    "target": {
+                        "reference": TARGET_URL,
+                        "name": "WP Regular BlockModel",
+                        "schema_id": str(self.schemas[TARGET_URL]),
+                        "attribute": {"reference": "attributes", "name": parameters["target"]["attribute"]["name"]},
+                        "diagnostics": {"kriging_variance": {"reference": "attributes", "name": "KV"}},
+                    },
+                }
+
+            backend.wait_for_results.side_effect = wait_for_results
+            return backend
+
+        shell = InteractiveShell.instance()
+        namespace = {"get_ipython": lambda: shell}
+        with (
+            self.transport.set_http_response(status_code=200, content=json.dumps(self.catalogue)),
+            patch("evo.notebooks.ServiceManagerWidget.with_auth_code") as authentication,
+            patch("evo.objects.typed.object_from_path", AsyncMock(side_effect=lambda context, path: inputs[path])),
+            patch("evo.compute.resolution.DownloadedObject.from_context", side_effect=self._object),
+            patch("evo.compute.outputs.object_from_reference", AsyncMock(return_value=target)) as load_target,
+            patch("evo.compute.engine.JobClient.submit", side_effect=submit),
+            patch("evo.compute.tasks.create_default_feedback", return_value=self.feedback),
+            patch.object(self.connector, "close", AsyncMock()) as close,
+            patch.object(shell.extension_manager, "load_extension"),
+            patch("plotly.graph_objects.Figure.show") as show,
+        ):
+            authentication.return_value.login = AsyncMock(return_value=self.context)
+            for number, cell in enumerate(notebook["cells"], start=1):
+                language = "python" if cell["cell_type"] == "code" else "markdown"
+                self.assertEqual(language, cell["metadata"]["language"])
+                self.assertEqual(cell["id"], cell["metadata"]["id"])
+                if cell["cell_type"] != "code":
+                    continue
+                self.assertIsNone(cell["execution_count"])
+                self.assertEqual([], cell["outputs"])
+                code = compile(
+                    shell.input_transformer_manager.transform_cell("".join(cell["source"])),
+                    f"Cell {number}",
+                    "exec",
+                    ast.PyCF_ALLOW_TOP_LEVEL_AWAIT,
+                )
+                if code.co_flags & inspect.CO_COROUTINE:
+                    await eval(code, namespace)
+                else:
+                    exec(code, namespace)
+            self.assertEqual(6, len(submitted))
+            self.assertEqual({0, 1}, set(started))
+            self.assertTrue(all(len(tasks) == 3 for tasks in started.values()))
+            self.assertEqual([KrigingResult, IDWResult, KNNResult], [type(result) for result in namespace["results"]])
+            self.assertTrue(all(isinstance(result, TaskResult) for result in namespace["engine_results"]))
+            self.assertTrue(all(isinstance(job, TaskJob) for job in namespace["jobs"]))
+            self.assertTrue(namespace["comparison_df"]["Values match"].all())
+            self.assertEqual(4, len(namespace["fig"].data))
+            self.assertAlmostEqual(0.2, namespace["summary_df"].loc["mean", "Declustered Composites"])
+            load_target.assert_awaited_once()
+            self.assertEqual(2, target.to_dataframe.await_count)
+            close.assert_awaited()
+            show.assert_called_once()
+            namespace["engine_df"].loc[0, "Cu_OK"] += 1
+            exec("".join(notebook["cells"][36]["source"]), namespace)
+            self.assertFalse(namespace["comparison_df"].loc["Cu_OK", "Values match"])
+            namespace["engine_df"]["Cu_OK"] = float("nan")
+            namespace["block_model_df"]["Cu_OK"] = float("nan")
+            exec("".join(notebook["cells"][36]["source"]), namespace)
+            self.assertFalse(namespace["comparison_df"].loc["Cu_OK", "Values match"])
+            namespace["engine_df"].index = [2, 1, 0]
+            exec("".join(notebook["cells"][36]["source"]), namespace)
+            self.assertFalse(namespace["comparison_df"].loc["Cu_IDW", "Values match"])
 
 
 class TestTaskResultList(unittest.TestCase):

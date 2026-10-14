@@ -81,6 +81,10 @@ formatting and aggregate progress. Preview remains an explicit opt-in on this fa
 These calls now require access to the task catalogue as well as job submission. Direct
 `TaskRunner` usage remains available as the lower-level API.
 
+The [estimation engine notebook](docs/examples/estimation_engine.ipynb) follows the
+existing estimation workflow, showing both the unchanged `tasks.run(...)` call and
+explicit async job submission with the same parameter models, result queries and plots.
+
 ### Submitting and managing jobs
 
 Generic tasks expose async `submit(...)` to return the accepted job without waiting:
