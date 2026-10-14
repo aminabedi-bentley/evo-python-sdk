@@ -11,19 +11,29 @@
 
 """Tests for the compute tasks module imports and basic functionality."""
 
+import asyncio
 import inspect
+import json
 import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
 
+from evo.common.interfaces import IFeedback
+from evo.common.test_tools import ORG, TestWithConnector
+from evo.objects import ObjectSchema
 from evo.objects.exceptions import SchemaIDFormatError
 from pydantic import ValidationError
 
+from evo.compute import JobClient, TaskJob, TaskResult, _stubgen
 from evo.compute.tasks import SearchNeighborhood, run
-from evo.compute.tasks.common import Ellipsoid, EllipsoidRanges
+from evo.compute.tasks.common import Ellipsoid, EllipsoidRanges, Filter, FilterCondition, Source, Target
 from evo.compute.tasks.common.results import TaskAttribute, TaskResultList, TaskTarget
 from evo.compute.tasks.common.runner import TaskRegistry, run_tasks
 from evo.compute.tasks.common.source_target import _convert_object_reference
+from evo.compute.tasks.geostatistics.idw import IDWParameters, IDWResult
+from evo.compute.tasks.geostatistics.knn import KNNParameters, KNNResult
 from evo.compute.tasks.geostatistics.kriging import (
+    BlockDiscretisation,
+    KrigingDiagnostics,
     KrigingMethod,
     KrigingParameters,
     KrigingResult,
@@ -32,6 +42,15 @@ from evo.compute.tasks.geostatistics.kriging import (
     KrigingTargetResult,
     OrdinaryKriging,
     SimpleKriging,
+)
+from test_engine import FakeContext
+from test_jobs import RecordingFeedback
+from test_payload_parity import (
+    POINTSET_URL,
+    TARGET_URL,
+    VARIOGRAM_URL,
+    _pending_attribute,
+    payload_differences,
 )
 
 
@@ -137,6 +156,12 @@ def _mock_kriging_job():
         ),
     )
     return mock_job
+
+
+def _mock_task_job(context):
+    backend = _mock_kriging_job()
+    backend.wait_for_results.return_value = backend.wait_for_results.return_value.model_dump(mode="json")
+    return TaskJob(backend, None, context)
 
 
 class TestPreviewFlagBehavior(unittest.IsolatedAsyncioTestCase):
@@ -356,6 +381,58 @@ class TestSearchNeighborhood(unittest.TestCase):
 class TestRunTasksDispatch(unittest.IsolatedAsyncioTestCase):
     """Tests that run_tasks dispatches to concrete runner subclasses, not abstract TaskRunner."""
 
+    async def test_run_tasks_uses_engine_and_keeps_native_result(self):
+        mock_context, _ = _mock_kriging_context()
+        mock_params = MagicMock(spec=KrigingParameters)
+        payload = {"source": {}, "target": {}}
+        mock_params.model_dump.return_value = payload
+        feedback = MagicMock(spec=IFeedback)
+        raw_result = _mock_kriging_job().wait_for_results.return_value.model_dump()
+        job = MagicMock(spec=TaskJob)
+        job.results.return_value = TaskResult(raw_result, None, mock_context)
+
+        with (
+            patch("evo.compute.tasks.common.runner._registry.get_runner_for_params", return_value=KrigingRunner),
+            patch("evo.compute.engine.ComputeClient", autospec=True) as client_type,
+            patch("evo.compute.tasks.common.runner.JobClient.submit", return_value=_mock_kriging_job()),
+        ):
+            client_type.return_value.asubmit.return_value = job
+            results = await run_tasks(mock_context, [mock_params], preview=True, fb=feedback)
+
+        client_type.assert_called_once_with(mock_context)
+        client_type.return_value.asubmit.assert_awaited_once_with(
+            "geostatistics", "kriging", {"source": {}, "target": {}, "preview": True}
+        )
+        job.results.assert_awaited_once()
+        self.assertIsInstance(results[0], KrigingResult)
+        self.assertEqual("t", results[0].target_name)
+        self.assertEqual("an", results[0].attribute_name)
+        self.assertIs(mock_context, results[0]._context)
+        self.assertEqual({"source": {}, "target": {}}, payload)
+        job.results.await_args.kwargs["fb"].progress(1.0, "remote job message")
+        feedback.progress.assert_called_once_with(1.0, "Completed 1/1")
+
+    async def test_unknown_parameter_type_is_rejected_before_any_submission(self):
+        mock_context, _ = _mock_kriging_context()
+        known = KrigingParameters.model_construct()
+        unknown = object()
+        with patch("evo.compute.engine.ComputeClient", autospec=True) as client_type:
+            with self.assertRaisesRegex(TypeError, "object"):
+                await run_tasks(mock_context, [known, unknown])
+        client_type.assert_not_called()
+
+    async def test_backend_failure_is_not_hidden(self):
+        mock_context, _ = _mock_kriging_context()
+        mock_params = MagicMock(spec=KrigingParameters)
+        mock_params.model_dump.return_value = {"source": {}, "target": {}}
+        with (
+            patch("evo.compute.engine.ComputeClient", autospec=True) as client_type,
+            patch("evo.compute.tasks.common.runner._registry.get_runner_for_params", return_value=KrigingRunner),
+        ):
+            client_type.return_value.asubmit.side_effect = RuntimeError("submission failed")
+            with self.assertRaisesRegex(RuntimeError, "submission failed"):
+                await run_tasks(mock_context, [mock_params])
+
     async def test_run_tasks_dispatches_to_registered_runner(self):
         """run_tasks should use the registered runner subclass, not TaskRunner directly."""
         mock_context, _ = _mock_kriging_context()
@@ -367,12 +444,9 @@ class TestRunTasksDispatch(unittest.IsolatedAsyncioTestCase):
                 "evo.compute.tasks.common.runner._registry.get_runner_for_params",
                 return_value=KrigingRunner,
             ),
-            patch(
-                "evo.compute.tasks.common.runner.JobClient.submit",
-                new_callable=AsyncMock,
-                return_value=_mock_kriging_job(),
-            ),
+            patch("evo.compute.engine.ComputeClient", autospec=True) as client_type,
         ):
+            client_type.return_value.asubmit.return_value = _mock_task_job(mock_context)
             results = await run_tasks(mock_context, [mock_params], preview=True)
 
         self.assertEqual(len(results), 1)
@@ -392,12 +466,9 @@ class TestRunTasksDispatch(unittest.IsolatedAsyncioTestCase):
                 "evo.compute.tasks.common.runner._registry.get_runner_for_params",
                 return_value=KrigingRunner,
             ),
-            patch(
-                "evo.compute.tasks.common.runner.JobClient.submit",
-                new_callable=AsyncMock,
-                return_value=_mock_kriging_job(),
-            ),
+            patch("evo.compute.engine.ComputeClient", autospec=True) as client_type,
         ):
+            client_type.return_value.asubmit.return_value = _mock_task_job(mock_context)
             results = await run_tasks(mock_context, params_list, preview=True)
 
         self.assertEqual(len(results), 3)
@@ -424,6 +495,27 @@ class TestRunTasksDispatch(unittest.IsolatedAsyncioTestCase):
 class TestRunReturnsTaskResultList(unittest.IsolatedAsyncioTestCase):
     """Tests that the public run() function returns TaskResultList for multi-param calls."""
 
+    async def test_default_feedback_and_preview_are_preserved(self):
+        mock_context, _ = _mock_kriging_context()
+        mock_params = MagicMock(spec=KrigingParameters)
+        mock_params.model_dump.return_value = {"source": {}, "target": {}}
+        feedback = MagicMock(spec=IFeedback)
+        job = _mock_task_job(mock_context)
+        with (
+            patch("evo.compute.engine.ComputeClient", autospec=True) as client_type,
+            patch("evo.compute.tasks.create_default_feedback", return_value=feedback) as create_feedback,
+            patch("evo.compute.tasks.common.runner._registry.get_runner_for_params", return_value=KrigingRunner),
+        ):
+            client_type.return_value.asubmit.return_value = job
+            result = await run(mock_context, mock_params)
+        create_feedback.assert_called_once_with("Tasks")
+        client_type.return_value.asubmit.assert_awaited_once_with(
+            "geostatistics", "kriging", {"source": {}, "target": {}, "preview": False}
+        )
+        job._job.wait_for_results.await_args.kwargs["fb"].progress(1.0)
+        feedback.progress.assert_called_once_with(1.0, "Completed 1/1")
+        self.assertIsInstance(result, KrigingResult)
+
     async def test_run_single_returns_bare_result(self):
         """run() with a single param should return a bare result, not TaskResultList."""
         mock_context, _ = _mock_kriging_context()
@@ -435,12 +527,9 @@ class TestRunReturnsTaskResultList(unittest.IsolatedAsyncioTestCase):
                 "evo.compute.tasks.common.runner._registry.get_runner_for_params",
                 return_value=KrigingRunner,
             ),
-            patch(
-                "evo.compute.tasks.common.runner.JobClient.submit",
-                new_callable=AsyncMock,
-                return_value=_mock_kriging_job(),
-            ),
+            patch("evo.compute.engine.ComputeClient", autospec=True) as client_type,
         ):
+            client_type.return_value.asubmit.return_value = _mock_task_job(mock_context)
             result = await run(mock_context, mock_params, preview=True)
 
         self.assertIsInstance(result, KrigingResult)
@@ -460,12 +549,9 @@ class TestRunReturnsTaskResultList(unittest.IsolatedAsyncioTestCase):
                 "evo.compute.tasks.common.runner._registry.get_runner_for_params",
                 return_value=KrigingRunner,
             ),
-            patch(
-                "evo.compute.tasks.common.runner.JobClient.submit",
-                new_callable=AsyncMock,
-                return_value=_mock_kriging_job(),
-            ),
+            patch("evo.compute.engine.ComputeClient", autospec=True) as client_type,
         ):
+            client_type.return_value.asubmit.return_value = _mock_task_job(mock_context)
             results = await run(mock_context, params_list, preview=True)
 
         self.assertIsInstance(results, TaskResultList)
@@ -479,6 +565,125 @@ class TestRunReturnsTaskResultList(unittest.IsolatedAsyncioTestCase):
         results = await run(mock_context, [], preview=True)
         self.assertIsInstance(results, TaskResultList)
         self.assertEqual(len(results), 0)
+
+
+class TestNativeFacadeEngineParity(TestWithConnector):
+    def setUp(self):
+        super().setUp()
+        self.context = FakeContext(self.connector, ORG.id)
+        specs = [
+            spec
+            for spec in _stubgen.load_snapshot(_stubgen.DEFAULT_SNAPSHOT_DIR)
+            if spec.topic == "geostatistics" and spec.name in {"kriging", "idw", "knn"}
+        ]
+        self.catalogue = {
+            "results": [spec.model_dump(mode="json", by_alias=True) for spec in specs],
+            "total": len(specs),
+        }
+        self.schemas = {
+            POINTSET_URL: ObjectSchema.from_id("/objects/pointset/1.2.0/pointset.schema.json"),
+            TARGET_URL: ObjectSchema.from_id("/objects/block-model/1.0.0/block-model.schema.json"),
+            VARIOGRAM_URL: ObjectSchema.from_id("/objects/variogram/1.1.0/variogram.schema.json"),
+        }
+        self.feedback = RecordingFeedback()
+
+    def _parameters(self):
+        search = SearchNeighborhood(
+            ellipsoid=Ellipsoid(ranges=EllipsoidRanges(major=150, semi_major=100, minor=75)),
+            max_samples=30,
+            min_samples=1,
+        )
+        common = {
+            "source": Source(object=POINTSET_URL, attribute="locations.attributes[?name=='Cu_pct']"),
+            "source_filter": Filter(
+                where=FilterCondition(
+                    attribute="locations.attributes[?name=='Geological_model']", operator="in", values=["Early Diorite"]
+                )
+            ),
+            "target_filter": Filter(
+                where=FilterCondition(
+                    attribute="attributes[?name=='Geological model']", operator="in", values=["Early Diorite"]
+                )
+            ),
+            "neighborhood": search,
+        }
+        return [
+            KrigingParameters(
+                **common,
+                target=Target.new_attribute(TARGET_URL, "Cu_OK"),
+                variogram=VARIOGRAM_URL,
+                block_discretisation=BlockDiscretisation(nx=5, ny=5, nz=2),
+                diagnostics=KrigingDiagnostics(kriging_variance=_pending_attribute("KV", TARGET_URL)),
+            ),
+            IDWParameters(**common, target=Target.new_attribute(TARGET_URL, "Cu_IDW"), power=2),
+            KNNParameters(**common, target=Target.new_attribute(TARGET_URL, "Cu_KNN")),
+        ]
+
+    def _object(self, context, reference):
+        downloaded = MagicMock()
+        downloaded.metadata.schema_id = self.schemas[reference]
+        return downloaded
+
+    async def test_mixed_notebook_batch_preserves_payloads_results_and_feedback(self):
+        parameters = self._parameters()
+        expected = {
+            name: params.model_dump(mode="json", by_alias=True, exclude_none=True)
+            for name, params in zip(("kriging", "idw", "knn"), parameters, strict=True)
+        }
+        started, completed = [], []
+        ready = asyncio.Event()
+
+        async def submit(*, topic, task, parameters, preview, result_type, **kwargs):
+            self.assertEqual("geostatistics", topic)
+            self.assertTrue(preview)
+            self.assertIs(dict, result_type)
+            self.assertEqual([], payload_differences(expected[task], parameters))
+            backend = MagicMock(spec=JobClient)
+
+            async def wait_for_results(*, fb, polling_interval_seconds, retry):
+                self.assertEqual(0.5, polling_interval_seconds)
+                self.assertIsNone(retry)
+                fb.progress(0.5, "private job message")
+                started.append(task)
+                if len(started) == 3:
+                    ready.set()
+                await asyncio.wait_for(ready.wait(), timeout=5)
+                completed.append(task)
+                fb.progress(1.0, "private job message")
+                return {
+                    "message": task,
+                    "target": {
+                        "reference": TARGET_URL,
+                        "name": "WP Regular BlockModel",
+                        "schema_id": str(self.schemas[TARGET_URL]),
+                        "attribute": {"reference": "attributes", "name": parameters["target"]["attribute"]["name"]},
+                        "diagnostics": {"kriging_variance": {"reference": "attributes", "name": "KV"}},
+                    },
+                }
+
+            backend.wait_for_results.side_effect = wait_for_results
+            return backend
+
+        with (
+            self.transport.set_http_response(status_code=200, content=json.dumps(self.catalogue)),
+            patch("evo.compute.resolution.DownloadedObject.from_context", side_effect=self._object),
+            patch("evo.compute.engine.JobClient.submit", side_effect=submit) as submitted,
+        ):
+            results = await run(self.context, parameters, preview=True, fb=self.feedback)
+
+        self.assertEqual(3, submitted.await_count)
+        self.assertEqual(1, self.transport.request.call_count)
+        self.assertEqual("knn", completed[0])
+        self.assertIsInstance(results, TaskResultList)
+        self.assertEqual([KrigingResult, IDWResult, KNNResult], [type(result) for result in results])
+        self.assertEqual(["kriging", "idw", "knn"], [result.message for result in results])
+        self.assertEqual(["Cu_OK", "Cu_IDW", "Cu_KNN"], [result.attribute_name for result in results])
+        self.assertEqual("KV", results[0].diagnostics["kriging_variance"].name)
+        self.assertTrue(all(result._context is self.context for result in results))
+        self.assertIn("WP Regular BlockModel", str(results))
+        self.assertNotIn("?", str(results))
+        self.assertEqual((1.0, "Completed 3/3"), self.feedback.reports[-1])
+        self.assertFalse(any(message == "private job message" for progress, message in self.feedback.reports))
 
 
 class TestTaskResultList(unittest.TestCase):

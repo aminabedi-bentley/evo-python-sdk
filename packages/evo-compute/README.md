@@ -63,6 +63,24 @@ checks and native `KrigingResult`. Other tasks use the schema-driven generic sur
 with the task's wire parameter names, even for a task with an override or no snapshot.
 The existing lowercase task modules and `await tasks.run(manager, parameters)` API are unchanged.
 
+Existing parameter models also use the generic engine through `tasks.run`:
+
+```python
+from evo.compute import tasks
+
+results = await tasks.run(
+    manager, [kriging_parameters, idw_parameters, knn_parameters], preview=True
+)
+```
+
+The models keep their existing serialization, including defaults, filters and diagnostics.
+The engine shares discovery across the batch and submits jobs concurrently; registered
+runners convert their results back to the native SDK classes. A single input still returns
+its native result, and a list still returns an ordered `TaskResultList` with notebook
+formatting and aggregate progress. Preview remains an explicit opt-in on this facade.
+These calls now require access to the task catalogue as well as job submission. Direct
+`TaskRunner` usage remains available as the lower-level API.
+
 ### Submitting and managing jobs
 
 Generic tasks expose async `submit(...)` to return the accepted job without waiting:

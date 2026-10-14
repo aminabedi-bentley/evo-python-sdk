@@ -14,7 +14,8 @@
 This module provides a class-based system for defining and running compute tasks.
 Each task type is defined by subclassing :class:`TaskRunner` with specific parameter
 and result types. Subclasses are automatically registered so that the unified
-``run()`` function can dispatch to the correct runner based on the parameter type.
+``run()`` function can select the task and native result adapter based on the
+parameter type. Unified execution uses the generic engine and its job lifecycle.
 
 Defining a new task runner is as simple as:
 
@@ -283,10 +284,10 @@ async def run_tasks(
     fb: IFeedback = NoFeedback,
     preview: bool = False,
 ) -> list[TResult]:
-    """Run multiple tasks concurrently, dispatching based on parameter types.
+    """Run multiple tasks through the generic engine, preserving native results.
 
-    This function looks up the appropriate runner for each parameter based on
-    its type, allowing different task types to be run together.
+    Registered runners supply task identities and native result conversion.
+    The engine handles discovery, validation, resolution and job submission.
 
     Args:
         context: The context providing connector and org_id.
@@ -309,6 +310,8 @@ async def run_tasks(
     """
     if len(parameters) == 0:
         return []
+
+    from ...engine import ComputeClient
 
     total = len(parameters)
 
@@ -339,4 +342,17 @@ async def run_tasks(
         for runner_cls, params, task_fb in zip(runner_classes, parameters, tracked_fbs, strict=True)
     ]
 
-    return await asyncio.gather(*tasks)
+    client = ComputeClient(context)
+
+    async def _run_task(runner: TaskRunner[TParams, Any, TResult]) -> TResult:
+        payload = runner._params.model_dump(mode="json", by_alias=True, exclude_none=True)
+        job = await client.asubmit(runner.topic, runner.task, {**payload, "preview": runner._preview})
+        result = await job.results(
+            polling_interval_seconds=runner._polling_interval_seconds,
+            retry=runner._retry,
+            fb=runner._fb,
+        )
+        raw_result = runner.result_model_type.model_validate(dict(result))
+        return await runner._get_result(raw_result)
+
+    return await asyncio.gather(*(_run_task(runner) for runner in tasks))
