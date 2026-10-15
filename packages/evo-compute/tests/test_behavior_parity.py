@@ -35,9 +35,12 @@ asserting a likeness that does not exist.
 **Value checks are opt-in.** The engine only reproduces the runner's value-level refusals
 under ``deep_validation=True``, which is what these tests use and what a caller who wants
 this behavior has to ask for. Left off -- the default -- the engine still refuses a missing
-parameter, an unknown one, and a reference it cannot resolve, but a value the schema
+parameter and a reference it cannot resolve, but a value the schema
 disallows is sent for the platform to reject. ``TestWhereTheTwoPathsDiffer`` pins that
 boundary; it is the expectation the ticket asks to be made explicit.
+
+Unknown fields warn and are forwarded in both modes, so newer service parameters are not
+blocked by an older discovery schema. Unlike many SDK models, the engine does not discard them.
 
 Every task class opens with a case proving its *valid* inputs are accepted by both paths.
 Without it a broken fixture would refuse everything and the whole suite would pass for the
@@ -448,13 +451,11 @@ class TestLocationWiseBehaviorParity(BehaviorParityTestCase):
 class TestWhereTheTwoPathsDiffer(BehaviorParityTestCase):
     """The cases the contract above does not cover, asserted as they are rather than left implied."""
 
-    async def test_a_misspelled_parameter_reaches_the_platform_from_the_runner_only(self) -> None:
-        """DIVERGENCE, the engine is stricter: a parameter model ignores what it does not recognise.
+    async def test_unknown_parameters_are_forwarded_by_the_engine_but_ignored_by_the_model(self) -> None:
+        """The engine preserves caller intent with a warning instead of silently using a default.
 
-        None of these models set ``extra="forbid"``, so a typo is dropped in silence and the
-        job runs with a default the caller did not intend. The engine binds the call to a
-        signature synthesised from the schema, so the same typo is a refusal -- and one that
-        does not depend on validation being switched on.
+        A stale catalogue cannot distinguish a newer service parameter from a typo.
+        The service remains responsible for deciding whether an unknown field is valid.
         """
         misspelled = declustering_inputs(powr=2.5)
         del misspelled["power"]
@@ -463,8 +464,13 @@ class TestWhereTheTwoPathsDiffer(BehaviorParityTestCase):
         self.assertNotIn("powr", payload)
         self.assertEqual(2.0, payload["power"], "the runner should have fallen back to its own default")
 
-        error = await self.engine_refusal(DeclusteringRunner, **misspelled)
-        self.assertIn("got an unexpected keyword argument 'powr'", str(error))
+        with self._catalogue(DeclusteringRunner), self.assertLogs("compute.validation", level="WARNING") as logged:
+            submit, error = await self._attempt(ENGINE_MODULE, self._engine_call(DeclusteringRunner, misspelled))
+        self.assertIsNone(error)
+        self.assertEqual(1, submit.await_count)
+        self.assertEqual(2.5, submit.await_args.kwargs["parameters"]["powr"])
+        self.assertNotIn("power", submit.await_args.kwargs["parameters"])
+        self.assertIn("powr", "\n".join(logged.output))
 
     async def test_a_value_the_model_coerces_is_refused_by_the_engine(self) -> None:
         """DIVERGENCE, the engine is stricter: pydantic reads ``"500"`` as ``500``; JSON Schema does not.
@@ -506,14 +512,11 @@ class TestWhereTheTwoPathsDiffer(BehaviorParityTestCase):
             await self.engine_refusal(ConSimRunner, **too_many)
 
     async def test_the_default_engine_still_refuses_the_mistakes_it_can_see(self) -> None:
-        """Deep validation buys value checks, not the whole of them: three refusals survive without it."""
+        """Missing inputs and invalid references remain errors without deep validation."""
         with self.engine():  # the default
             missing = consim_inputs()
             del missing["variogram_model"]
             self.assertBlames("engine", await self.engine_refusal(ConSimRunner, **missing), "variogram_model")
-
-            unknown = consim_inputs(number_of_liness=500)
-            self.assertBlames("engine", await self.engine_refusal(ConSimRunner, **unknown), "number_of_liness")
 
             unresolvable = consim_inputs(variogram_model="variogram.json")
             self.assertBlames("engine", await self.engine_refusal(ConSimRunner, **unresolvable), "variogram_model")

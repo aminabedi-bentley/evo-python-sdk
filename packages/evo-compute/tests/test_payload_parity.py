@@ -55,7 +55,7 @@ from evo.objects.typed import Attribute, PendingAttribute
 from evo.objects.typed.base import BaseObject
 from pydantic import BaseModel
 
-from evo.compute import ComputeClient, DiscoveryClient, ParameterValidationError, TaskResource
+from evo.compute import ComputeClient, DiscoveryClient, TaskResource
 from evo.compute.tasks import CreateAttribute, SearchNeighborhood, Source, Target, UpdateAttribute
 from evo.compute.tasks.common import Ellipsoid, EllipsoidRanges, Filter, FilterCondition, Rotation
 from evo.compute.tasks.common.source_target import _convert_object_reference, _get_attribute_expression
@@ -468,8 +468,8 @@ class TestKrigingPayloadParity(PayloadParityTestCase):
         """WIRE SHAPE, NOT SAME INPUTS: ``source_filter`` is an argument only the runner has.
 
         It is ``exclude=True`` on the model and folded into ``source`` before anything is sent,
-        so the catalogue never advertises it and the engine rejects it -- the test below pins
-        that. What is worth asserting is that the shape the runner folds a filter into is the
+        so the catalogue never advertises it and the engine cannot fold it. What is worth
+        asserting is that the shape the runner folds a filter into is the
         shape an engine caller writes by hand, so this case compares payloads, not inputs.
         """
         source_filter = Filter(where=FilterCondition(attribute=GRADE_ATTRIBUTE, operator="greater_than", threshold=0.5))
@@ -482,16 +482,15 @@ class TestKrigingPayloadParity(PayloadParityTestCase):
         engine_payload = await self.engine_payload(KrigingRunner, **self._inputs(source=nested))
         self.assertPayloadParity(runner_payload, engine_payload)
 
-    async def test_the_folded_filter_fields_are_not_offered_as_engine_parameters(self) -> None:
-        """Folding a filter is runner-side work, so ``source_filter`` is not a task parameter."""
+    async def test_unknown_filter_fields_are_forwarded_without_sdk_folding(self) -> None:
+        """An unknown field warns and passes through, without inventing SDK-only semantics."""
         self.assertNotIn("source_filter", task_spec(KrigingRunner).parameters["properties"])
-        with self.assertRaises(ParameterValidationError) as caught:
-            await self.engine_payload(
-                KrigingRunner,
-                **self._inputs(),
-                source_filter={"where": {"type": "condition", "attribute": GRADE_ATTRIBUTE, "operator": "in"}},
-            )
-        self.assertIn("source_filter", str(caught.exception))
+        source_filter = {"where": {"type": "condition", "attribute": GRADE_ATTRIBUTE, "operator": "in"}}
+        with self.assertLogs("compute.validation", level="WARNING") as logged:
+            payload = await self.engine_payload(KrigingRunner, **self._inputs(), source_filter=source_filter)
+        self.assertEqual(source_filter, payload["source_filter"])
+        self.assertNotIn("filter", payload["source"])
+        self.assertIn("source_filter", "\n".join(logged.output))
 
     async def test_references_inside_a_composite_filter_are_resolved(self) -> None:
         """WIRE SHAPE, NOT SAME INPUTS: a ``composite`` node is walked like any other.

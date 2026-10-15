@@ -143,14 +143,15 @@ class ComputeClient:
     :param context: An authenticated Evo context.
     :param cache_ttl_seconds: How long a discovered task catalogue is cached.
     :param validate: Check the parameters against the task's JSON Schema before submitting
-        (required-field presence, and, under ``deep_validation``, the whole payload).
+        (required-field presence, and, under ``deep_validation``, known value constraints).
         Defaults to ``True``. ``False`` turns off deep validation too, whatever
         ``deep_validation`` says. It does *not* make the call unchecked: the parameters are
-        still bound to the signature synthesised from the schema, so an unknown or missing
-        required argument is still rejected. That is how the payload is built, not a
-        validation pass, and there is no useful call to make without it.
-    :param deep_validation: Additionally run full JSON Schema Draft 2020-12 validation.
-        Defaults to ``False``. Only consulted when ``validate`` is ``True``.
+        still bound to the signature synthesised from the schema, so a missing required
+        argument is still rejected. Unknown fields warn and are forwarded unchanged to the
+        service, since discovery may lag the task's supported inputs.
+    :param deep_validation: Additionally check known JSON Schema Draft 2020-12 constraints.
+        Defaults to ``False``. Only consulted when ``validate`` is ``True``. Extra fields
+        remain warning-only; their values must already be in wire format.
     :param check_schemas: Check that each referenced geoscience object is of a schema the
         task declares support for. Defaults to following ``validate``. Independent of it
         because the cost and the question differ: schema validation is local and free,
@@ -233,8 +234,18 @@ class ComputeClient:
         spec = await self._resolve_spec(topic, task)
         label = f"{topic}.{_normalise(task)}"
         signature = _signature_from_schema(spec)
+        accepts_extra = any(
+            parameter.kind == inspect.Parameter.VAR_KEYWORD for parameter in signature.parameters.values()
+        )
+        extra_parameters = (
+            {}
+            if accepts_extra
+            else {name: value for name, value in parameters.items() if name not in signature.parameters}
+        )
         try:
-            bound = signature.bind(**parameters)
+            bound = signature.bind(
+                **{name: value for name, value in parameters.items() if name not in extra_parameters}
+            )
         except TypeError as error:
             raise ParameterValidationError(f"{label}.run(): {error}", task=label, errors=[str(error)]) from None
 
@@ -247,6 +258,7 @@ class ComputeClient:
             wire_parameters = {names.get(name, name): value for name, value in wire_parameters.items()}
         else:
             wire_parameters.update(wire_parameters.pop("parameters", {}))
+        wire_parameters.update(extra_parameters)
 
         if validate is None:
             validate = self._validate

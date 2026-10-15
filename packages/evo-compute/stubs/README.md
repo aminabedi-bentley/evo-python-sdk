@@ -158,15 +158,23 @@ The stub is one half of a contract the engine enforces at run time from the same
 | Mistake | Caught statically by | Caught at run time by |
 |---|---|---|
 | unknown topic or task | *nothing — by design* | discovery lookup in `arun` |
-| unknown or missing parameter | the stub's `run(...)` signature | signature binding, then `validate_parameters` |
+| unknown parameter | the stub's `run(...)` signature | warning only; forwarded unchanged, including under deep validation |
+| missing required parameter | the stub's `run(...)` signature | signature binding, then `validate_parameters` |
 | wrong scalar type, bad enum member, missing nested field | the stub's `TypedDict`s and `Literal`s | `validate_parameters(..., deep=True)` |
 | a reference nothing could resolve | the stub's `ObjectInput` / `AttributeInput` unions | `ReferenceResolver`, then `validate_parameters(..., deep=True)` |
 
 Deep validation is opt-in — `ComputeClient(context, deep_validation=True)`, or
-`arun(..., deep_validation=True)` for a single call — because it costs a full JSON Schema
+`arun(..., deep_validation=True)` for a single call — because it costs a JSON Schema
 pass. `tests/test_stubgen.py::TestDeepValidationAgreement` asserts the two halves agree:
-the payload from `usage_ok.py` passes deep validation, and the mistakes `usage_bad.py`
-makes are rejected at run time too.
+the payload from `usage_ok.py` passes deep validation, and its known-value and reference
+mistakes are rejected at run time too.
+
+Discovery can lag the service, so unknown top-level and nested fields warn and are sent
+unchanged in both validation modes. Only closed-object restrictions are relaxed; declared
+types, bounds, enums, required fields and explicit additional-property value schemas still
+apply. Unknown values must already use the service's wire format, since the engine has no
+annotations to resolve their references. The generated hints stay precise for captured
+fields; `arun` accepts dictionaries for newer inputs absent from those hints.
 
 ## Verified with
 

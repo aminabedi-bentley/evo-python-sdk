@@ -179,6 +179,86 @@ class TestValidateParameters(unittest.TestCase):
         validate_parameters(spec, {"shape": "circle"}, deep=True)
         validate_parameters(spec, {"shape": 3}, deep=True)
 
+    def test_new_nested_fields_do_not_weaken_known_constraints(self) -> None:
+        spec = make_spec(
+            {
+                "type": "object",
+                "properties": {"config": {"$ref": "#/$defs/Config"}},
+                "required": ["config"],
+                "additionalProperties": False,
+                "$defs": {
+                    "Config": {
+                        "type": "object",
+                        "properties": {"count": {"type": "integer", "minimum": 1}},
+                        "required": ["count"],
+                        "additionalProperties": False,
+                    }
+                },
+            }
+        )
+        parameters = {"config": {"count": 2, "new_option": None}, "new_parameter": False}
+        validate_parameters(spec, parameters, deep=True)
+        self.assertEqual({"config": {"count": 2, "new_option": None}, "new_parameter": False}, parameters)
+
+        for invalid in ({}, {"count": "2"}, {"count": 0}):
+            with self.subTest(invalid=invalid), self.assertRaises(ParameterValidationError):
+                validate_parameters(spec, {"config": {**invalid, "new_option": None}}, deep=True)
+
+    def test_new_fields_are_allowed_inside_discriminated_unions(self) -> None:
+        spec = make_spec(
+            {
+                "type": "object",
+                "properties": {
+                    "method": {
+                        "discriminator": {"propertyName": "kind"},
+                        "oneOf": [
+                            {
+                                "type": "object",
+                                "properties": {"kind": {"const": "ordinary"}},
+                                "required": ["kind"],
+                                "additionalProperties": False,
+                            },
+                            {
+                                "type": "object",
+                                "properties": {"kind": {"const": "simple"}, "mean": {"type": "number"}},
+                                "required": ["kind", "mean"],
+                                "additionalProperties": False,
+                            },
+                        ],
+                    }
+                },
+            }
+        )
+        validate_parameters(spec, {"method": {"kind": "simple", "mean": 2.0, "new_option": True}}, deep=True)
+        with self.assertRaisesRegex(ParameterValidationError, r"method\.mean"):
+            validate_parameters(spec, {"method": {"kind": "simple", "mean": "invalid", "new_option": True}}, deep=True)
+
+    def test_extra_field_tolerance_preserves_typed_map_constraints_and_schema_literals(self) -> None:
+        spec = make_spec(
+            {
+                "type": "object",
+                "properties": {
+                    "counts": {"type": "object", "additionalProperties": {"type": "integer", "minimum": 1}},
+                    "literal": {"const": {"additionalProperties": False, "unevaluatedProperties": False}},
+                },
+                "unevaluatedProperties": False,
+            }
+        )
+        original = json.dumps(spec.parameters, sort_keys=True)
+        literal = {"additionalProperties": False, "unevaluatedProperties": False}
+        validate_parameters(spec, {"counts": {"new_counter": 2}, "literal": literal, "new_field": None}, deep=True)
+        self.assertEqual(original, json.dumps(spec.parameters, sort_keys=True))
+        for invalid in ("2", 0):
+            with (
+                self.subTest(invalid=invalid),
+                self.assertRaisesRegex(ParameterValidationError, r"counts\.new_counter"),
+            ):
+                validate_parameters(spec, {"counts": {"new_counter": invalid}, "new_field": None}, deep=True)
+        with self.assertRaisesRegex(ParameterValidationError, "literal"):
+            validate_parameters(
+                spec, {"literal": {"additionalProperties": True, "unevaluatedProperties": True}}, deep=True
+            )
+
     # -- reference-leaf relaxation ----------------------------------------- #
 
     def test_deep_relaxes_a_reference_leaf_declared_as_its_resolved_form(self) -> None:
