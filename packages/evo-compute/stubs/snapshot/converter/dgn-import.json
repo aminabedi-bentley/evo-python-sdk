@@ -1,6 +1,6 @@
 {
   "display_name": "DGN Import",
-  "version": "0.1.30",
+  "version": "0.1.31",
   "feature_flag": "converter-preview",
   "description": "Import DGN files into Evo as line segments, with fallback to triangle mesh or pointset.",
   "parameters": {

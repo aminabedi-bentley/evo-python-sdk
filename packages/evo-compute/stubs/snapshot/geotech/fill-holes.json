@@ -1,6 +1,6 @@
 {
   "display_name": "Fill Holes",
-  "version": "1.5.8",
+  "version": "1.5.16",
   "feature_flag": "geotech-preview",
   "description": "Fills holes in the triangle mesh of a GMM object using specified edge identifiers and a configurable fill mode strategy.",
   "parameters": {

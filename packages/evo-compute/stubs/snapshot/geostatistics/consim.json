@@ -1,6 +1,6 @@
 {
   "display_name": "conditioned_simulator",
-  "version": "0.7.1",
+  "version": "0.8.0",
   "feature_flag": "",
   "description": "For more information, please read the <a href='/docs/guides/geostatistics-tasks/tasks/conditional-simulation-workflow'>guide</a>",
   "parameters": {

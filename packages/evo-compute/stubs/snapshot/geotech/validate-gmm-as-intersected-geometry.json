@@ -1,6 +1,6 @@
 {
   "display_name": "Validate GMM as Intersected Geometry",
-  "version": "1.5.8",
+  "version": "1.5.16",
   "feature_flag": "geotech-preview",
   "description": "Checks whether a Geological Model Meshes object is valid as intersected geometry and returns human-readable descriptions of any issues found.",
   "parameters": {

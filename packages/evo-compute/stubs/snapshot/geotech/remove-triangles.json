@@ -1,6 +1,6 @@
 {
   "display_name": "Remove Triangles",
-  "version": "1.5.8",
+  "version": "1.5.16",
   "feature_flag": "geotech-preview",
   "description": "Removes the selected triangle indices from a Geological Model Meshes object and uploads the updated mesh as a new object.",
   "parameters": {

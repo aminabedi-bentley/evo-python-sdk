@@ -1,6 +1,6 @@
 {
   "display_name": "VTK Import",
-  "version": "0.1.30",
+  "version": "0.1.31",
   "feature_flag": "converter-preview",
   "description": "VTK Import compute task",
   "parameters": {

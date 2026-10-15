@@ -1,6 +1,6 @@
 {
   "display_name": "Add To Intersected Geometry",
-  "version": "1.5.8",
+  "version": "1.5.16",
   "feature_flag": "geotech-preview",
   "description": "Adds one or more triangle mesh objects to an existing intersected Geological Model Meshes object.",
   "parameters": {

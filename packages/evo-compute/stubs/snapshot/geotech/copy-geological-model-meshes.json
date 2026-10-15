@@ -1,6 +1,6 @@
 {
   "display_name": "Copy Geological Model Meshes",
-  "version": "1.5.8",
+  "version": "1.5.16",
   "feature_flag": "geotech-preview",
   "description": "Copies an existing set of geological model meshes, optionally removing external volumes from the result.",
   "parameters": {

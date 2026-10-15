@@ -1,6 +1,6 @@
 {
   "display_name": "Check Triangle Orientation",
-  "version": "1.5.8",
+  "version": "1.5.16",
   "feature_flag": "geotech-preview",
   "description": "Identifies triangles with inconsistent normal orientation relative to their neighbors in a Triangle Mesh or Geological Model Meshes object.",
   "parameters": {

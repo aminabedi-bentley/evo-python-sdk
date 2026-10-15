@@ -1,6 +1,6 @@
 {
   "display_name": "OBJ Import",
-  "version": "0.1.30",
+  "version": "0.1.31",
   "feature_flag": "converter-preview",
   "description": "Import OBJ (Wavefront) files into Evo as Triangle Mesh geoscience objects. Supports triangles, quads (auto-triangulated), and multiple objects within a single file.",
   "parameters": {

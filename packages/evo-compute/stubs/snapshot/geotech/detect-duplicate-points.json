@@ -1,6 +1,6 @@
 {
   "display_name": "Detect Duplicate Points",
-  "version": "1.5.8",
+  "version": "1.5.16",
   "feature_flag": "geotech-preview",
   "description": "Identifies exact duplicate vertices in a Triangle Mesh or Geological Model Meshes object.",
   "parameters": {

@@ -1,6 +1,6 @@
 {
   "display_name": "IDW",
-  "version": "0.7.1",
+  "version": "0.8.0",
   "feature_flag": "geostatistics-preview",
   "description": "Inverse distance weighting estimation using weighted average of nearby sample values, where weights are inversely proportional to distance raised to a specified power.",
   "parameters": {
@@ -1086,6 +1086,16 @@
             ],
             "title": "Evaluation Target",
             "type": "string"
+          },
+          "update_mode": {
+            "default": "auto",
+            "description": "How to treat target locations that this run did not estimate, such as locations excluded by the target filter or where the neighbourhood search found no samples. 'merge' keeps the values those locations already had, so running one domain at a time accumulates results into a single attribute. 'replace' clears them, so the attribute only ever holds the results of the latest run. 'auto' (the default) merges when a target filter is set and replaces otherwise. Merging only applies to attributes that already exist on the target object; a newly created attribute has nothing to merge with. Boolean and integer diagnostic attributes have no way to represent 'not estimated', so within the filter they are always written as produced.",
+            "enum": [
+              "auto",
+              "merge",
+              "replace"
+            ],
+            "title": "Update Mode"
           }
         },
         "required": [

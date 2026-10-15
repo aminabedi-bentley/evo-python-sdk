@@ -1,6 +1,6 @@
 {
   "display_name": "Create Cross Section",
-  "version": "1.5.8",
+  "version": "1.5.16",
   "feature_flag": "geotech-preview",
   "description": "Intersects parametric volumes in a 3D Design Geometry with a vertical plane defined by a section origin and dip azimuth, producing a 2D Design Geometry with polyline boundaries.",
   "parameters": {

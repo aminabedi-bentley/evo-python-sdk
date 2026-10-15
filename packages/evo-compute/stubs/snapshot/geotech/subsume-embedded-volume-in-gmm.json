@@ -1,6 +1,6 @@
 {
   "display_name": "Subsume Embedded Volume in GMM",
-  "version": "1.5.8",
+  "version": "1.5.16",
   "feature_flag": "geotech-preview",
   "description": "Merges a specified source embedded volume into a target volume in a GMM, either by explicit index or by automatic selection strategy.",
   "parameters": {

@@ -1,6 +1,6 @@
 {
   "display_name": "Fix Self-Intersections",
-  "version": "1.5.8",
+  "version": "1.5.16",
   "feature_flag": "geotech-preview",
   "description": "Fixes self-intersections in the triangle mesh of a GMM object using configurable intersection detection settings.",
   "parameters": {

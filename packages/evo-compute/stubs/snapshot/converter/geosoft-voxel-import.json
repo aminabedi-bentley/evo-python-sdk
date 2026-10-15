@@ -1,6 +1,6 @@
 {
   "display_name": "Geosoft Voxel Import",
-  "version": "0.1.30",
+  "version": "0.1.31",
   "feature_flag": "converter-preview",
   "description": "Import Geosoft Voxel (.geosoft_voxel) files into Evo as either Regular-3D or Tensor-3D geoscience objects.",
   "parameters": {

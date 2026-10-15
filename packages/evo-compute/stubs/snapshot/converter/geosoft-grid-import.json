@@ -1,6 +1,6 @@
 {
   "display_name": "Geosoft Grid Import",
-  "version": "0.1.30",
+  "version": "0.1.31",
   "feature_flag": "converter-preview",
   "description": "Import Geosoft Grid (.grd/.grd.gi) files into Evo as Regular-2D geoscience objects.",
   "parameters": {

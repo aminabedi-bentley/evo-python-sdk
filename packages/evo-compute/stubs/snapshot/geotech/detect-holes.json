@@ -1,6 +1,6 @@
 {
   "display_name": "Detect Holes",
-  "version": "1.5.8",
+  "version": "1.5.16",
   "feature_flag": "geotech-preview",
   "description": "Identifies holes in a Triangle Mesh or Geological Model Meshes object based on boundary edge analysis.",
   "parameters": {

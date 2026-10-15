@@ -1,6 +1,6 @@
 {
   "display_name": "Detect Non-Partitioning Surfaces",
-  "version": "1.5.8",
+  "version": "1.5.16",
   "feature_flag": "geotech-preview",
   "description": "Identifies non-partitioning surfaces that are neither fins nor surfaces with holes in a Triangle Mesh or Geological Model Meshes object.",
   "parameters": {

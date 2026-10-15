@@ -1,6 +1,6 @@
 {
   "display_name": "CPT reader task",
-  "version": "0.1.47",
+  "version": "0.1.57",
   "feature_flag": "cpt-to-borehole-preview",
   "description": "CPT reader task",
   "parameters": {

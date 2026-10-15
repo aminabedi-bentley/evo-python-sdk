@@ -1,6 +1,6 @@
 {
   "display_name": "Create Geological Model Meshes",
-  "version": "1.5.8",
+  "version": "1.5.16",
   "feature_flag": "geotech-preview",
   "description": "Decomposes an intersected mesh or existing GMM into per-volume geological model meshes, optionally removing the top (external) volume.",
   "parameters": {

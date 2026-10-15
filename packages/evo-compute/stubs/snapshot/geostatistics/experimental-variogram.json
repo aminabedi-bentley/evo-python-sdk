@@ -1,6 +1,6 @@
 {
   "display_name": "Experimental Variogram",
-  "version": "0.7.1",
+  "version": "0.8.0",
   "feature_flag": "geostatistics-preview",
   "description": "Computes one or more experimental (sample) variograms from a points or downhole intervals source object and writes them to a new experimental variogram object. A single call can mix omnidirectional, directional (azimuth/dip tolerance cone with optional bandwidth/bandheight) and downhole variograms, each with its own lag definition.",
   "parameters": {

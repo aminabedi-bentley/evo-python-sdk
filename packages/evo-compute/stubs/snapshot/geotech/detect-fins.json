@@ -1,6 +1,6 @@
 {
   "display_name": "Detect Fins",
-  "version": "1.5.8",
+  "version": "1.5.16",
   "feature_flag": "geotech-preview",
   "description": "Identifies fin-like connected components without closed boundaries in a Triangle Mesh or Geological Model Meshes object.",
   "parameters": {

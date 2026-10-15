@@ -1,6 +1,6 @@
 {
   "display_name": "Kriging",
-  "version": "0.7.1",
+  "version": "0.8.0",
   "feature_flag": "geostatistics-preview",
   "description": "For more information, please read the <a href='/docs/guides/geostatistics-tasks/tasks/kriging'>guide</a>",
   "parameters": {
@@ -1029,146 +1029,18 @@
         "additionalProperties": false,
         "description": "The target object and attribute to create or update with kriging results.",
         "properties": {
-          "aniso_mean_distance_attribute": {
-            "description": "Attribute to create or update with the mean anisotropic (ellipsoid-space) distance from query point to all neighbours.",
-            "oneOf": [
-              {
-                "additionalProperties": false,
-                "properties": {
-                  "name": {
-                    "description": "The name of the attribute to create.",
-                    "title": "Name",
-                    "type": "string"
-                  },
-                  "operation": {
-                    "const": "create",
-                    "description": "The operation to perform on the attribute.",
-                    "title": "Operation"
-                  }
-                },
-                "required": [
-                  "operation",
-                  "name"
-                ],
-                "type": "object"
-              },
-              {
-                "additionalProperties": false,
-                "properties": {
-                  "operation": {
-                    "const": "update",
-                    "description": "The operation to perform on the attribute.",
-                    "title": "Operation"
-                  },
-                  "reference": {
-                    "attribute_from": "2/object",
-                    "attribute_path": {
-                      "block-model/[>=1.0,<2]": [
-                        "attributes[?attribute_type=='Float64']"
-                      ],
-                      "downhole-intervals/[>=1.2,<2]": [
-                        "attributes[?attribute_type=='scalar']"
-                      ],
-                      "pointset/[>=1.2,<2]": [
-                        "locations.attributes[?attribute_type=='scalar']"
-                      ],
-                      "regular-3d-grid/[>=1.2,<2]": [
-                        "cell_attributes[?attribute_type=='scalar']"
-                      ],
-                      "regular-masked-3d-grid/[>=1.2,<2]": [
-                        "cell_attributes[?attribute_type=='scalar']"
-                      ],
-                      "tensor-3d-grid/[>=1.2,<2]": [
-                        "cell_attributes[?attribute_type=='scalar']"
-                      ]
-                    },
-                    "description": "Reference to an existing attribute to update.",
-                    "reference_to": "attribute",
-                    "title": "Reference",
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "operation",
-                  "reference"
-                ],
-                "type": "object"
-              }
-            ],
-            "target": "attribute",
-            "title": "Anisotropic Mean Distance"
-          },
-          "aniso_min_distance_attribute": {
-            "description": "Attribute to create or update with the minimum anisotropic (ellipsoid-space) distance from query point to any neighbour.",
-            "oneOf": [
-              {
-                "additionalProperties": false,
-                "properties": {
-                  "name": {
-                    "description": "The name of the attribute to create.",
-                    "title": "Name",
-                    "type": "string"
-                  },
-                  "operation": {
-                    "const": "create",
-                    "description": "The operation to perform on the attribute.",
-                    "title": "Operation"
-                  }
-                },
-                "required": [
-                  "operation",
-                  "name"
-                ],
-                "type": "object"
-              },
-              {
-                "additionalProperties": false,
-                "properties": {
-                  "operation": {
-                    "const": "update",
-                    "description": "The operation to perform on the attribute.",
-                    "title": "Operation"
-                  },
-                  "reference": {
-                    "attribute_from": "2/object",
-                    "attribute_path": {
-                      "block-model/[>=1.0,<2]": [
-                        "attributes[?attribute_type=='Float64']"
-                      ],
-                      "downhole-intervals/[>=1.2,<2]": [
-                        "attributes[?attribute_type=='scalar']"
-                      ],
-                      "pointset/[>=1.2,<2]": [
-                        "locations.attributes[?attribute_type=='scalar']"
-                      ],
-                      "regular-3d-grid/[>=1.2,<2]": [
-                        "cell_attributes[?attribute_type=='scalar']"
-                      ],
-                      "regular-masked-3d-grid/[>=1.2,<2]": [
-                        "cell_attributes[?attribute_type=='scalar']"
-                      ],
-                      "tensor-3d-grid/[>=1.2,<2]": [
-                        "cell_attributes[?attribute_type=='scalar']"
-                      ]
-                    },
-                    "description": "Reference to an existing attribute to update.",
-                    "reference_to": "attribute",
-                    "title": "Reference",
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "operation",
-                  "reference"
-                ],
-                "type": "object"
-              }
-            ],
-            "target": "attribute",
-            "title": "Anisotropic Minimum Distance"
-          },
           "attribute": {
-            "description": "Name of the attribute to create or update on the target object",
+            "description": "Attribute to create or update on the target object with the kriging estimate. Use `{\"operation\": \"create\", \"name\": ...}` to add a new attribute, or `{\"operation\": \"update\", \"reference\": ...}` to overwrite an existing one.",
+            "examples": [
+              {
+                "name": "kriging_result",
+                "operation": "create"
+              },
+              {
+                "operation": "update",
+                "reference": "locations.attributes[?name=='kriging_result']"
+              }
+            ],
             "oneOf": [
               {
                 "additionalProperties": false,
@@ -1199,7 +1071,7 @@
                     "title": "Operation"
                   },
                   "reference": {
-                    "attribute_from": "2/object",
+                    "attribute_from": "3/object",
                     "attribute_path": {
                       "block-model/[>=1.0,<2]": [
                         "attributes[?attribute_type=='Float64']"
@@ -1210,10 +1082,16 @@
                       "pointset/[>=1.2,<2]": [
                         "locations.attributes[?attribute_type=='scalar']"
                       ],
+                      "regular-2d-grid/[>=1.2,<2]": [
+                        "cell_attributes[?attribute_type=='scalar']"
+                      ],
                       "regular-3d-grid/[>=1.2,<2]": [
                         "cell_attributes[?attribute_type=='scalar']"
                       ],
                       "regular-masked-3d-grid/[>=1.2,<2]": [
+                        "cell_attributes[?attribute_type=='scalar']"
+                      ],
+                      "tensor-2d-grid/[>=1.2,<2]": [
                         "cell_attributes[?attribute_type=='scalar']"
                       ],
                       "tensor-3d-grid/[>=1.2,<2]": [
@@ -1236,74 +1114,1218 @@
             "target": "attribute",
             "title": "Kriging Target Attribute"
           },
-          "efficiency_attribute": {
-            "description": "Attribute to create or update with the kriging efficiency (proportion of point/intra-block variance explained by kriging weights).",
-            "oneOf": [
-              {
-                "additionalProperties": false,
-                "properties": {
-                  "name": {
-                    "description": "The name of the attribute to create.",
-                    "title": "Name",
-                    "type": "string"
-                  },
-                  "operation": {
-                    "const": "create",
-                    "description": "The operation to perform on the attribute.",
-                    "title": "Operation"
+          "diagnostics": {
+            "additionalProperties": false,
+            "default": null,
+            "description": "Optional per-location diagnostic attributes to compute and write alongside the kriging result. Only diagnostics with an explicit attribute target are produced.",
+            "properties": {
+              "aniso_mean_distance": {
+                "description": "Attribute to create or update with the mean anisotropic (ellipsoid-space) distance from the target location to all neighbours.",
+                "examples": [
+                  {
+                    "name": "AvgAD",
+                    "operation": "create"
                   }
-                },
-                "required": [
-                  "operation",
-                  "name"
                 ],
-                "type": "object"
-              },
-              {
-                "additionalProperties": false,
-                "properties": {
-                  "operation": {
-                    "const": "update",
-                    "description": "The operation to perform on the attribute.",
-                    "title": "Operation"
-                  },
-                  "reference": {
-                    "attribute_from": "2/object",
-                    "attribute_path": {
-                      "block-model/[>=1.0,<2]": [
-                        "attributes[?attribute_type=='Float64']"
-                      ],
-                      "downhole-intervals/[>=1.2,<2]": [
-                        "attributes[?attribute_type=='scalar']"
-                      ],
-                      "pointset/[>=1.2,<2]": [
-                        "locations.attributes[?attribute_type=='scalar']"
-                      ],
-                      "regular-3d-grid/[>=1.2,<2]": [
-                        "cell_attributes[?attribute_type=='scalar']"
-                      ],
-                      "regular-masked-3d-grid/[>=1.2,<2]": [
-                        "cell_attributes[?attribute_type=='scalar']"
-                      ],
-                      "tensor-3d-grid/[>=1.2,<2]": [
-                        "cell_attributes[?attribute_type=='scalar']"
-                      ]
+                "oneOf": [
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "name": {
+                        "description": "The name of the attribute to create.",
+                        "title": "Name",
+                        "type": "string"
+                      },
+                      "operation": {
+                        "const": "create",
+                        "description": "The operation to perform on the attribute.",
+                        "title": "Operation"
+                      }
                     },
-                    "description": "Reference to an existing attribute to update.",
-                    "reference_to": "attribute",
-                    "title": "Reference",
-                    "type": "string"
+                    "required": [
+                      "operation",
+                      "name"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "operation": {
+                        "const": "update",
+                        "description": "The operation to perform on the attribute.",
+                        "title": "Operation"
+                      },
+                      "reference": {
+                        "attribute_from": "3/object",
+                        "attribute_path": {
+                          "block-model/[>=1.0,<2]": [
+                            "attributes[?attribute_type=='Float64']"
+                          ],
+                          "downhole-intervals/[>=1.2,<2]": [
+                            "attributes[?attribute_type=='scalar']"
+                          ],
+                          "pointset/[>=1.2,<2]": [
+                            "locations.attributes[?attribute_type=='scalar']"
+                          ],
+                          "regular-3d-grid/[>=1.2,<2]": [
+                            "cell_attributes[?attribute_type=='scalar']"
+                          ],
+                          "regular-masked-3d-grid/[>=1.2,<2]": [
+                            "cell_attributes[?attribute_type=='scalar']"
+                          ],
+                          "tensor-3d-grid/[>=1.2,<2]": [
+                            "cell_attributes[?attribute_type=='scalar']"
+                          ]
+                        },
+                        "description": "Reference to an existing attribute to update.",
+                        "reference_to": "attribute",
+                        "title": "Reference",
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "operation",
+                      "reference"
+                    ],
+                    "type": "object"
                   }
-                },
-                "required": [
-                  "operation",
-                  "reference"
                 ],
-                "type": "object"
+                "target": "attribute",
+                "title": "Anisotropic Mean Distance"
+              },
+              "aniso_min_distance": {
+                "description": "Attribute to create or update with the minimum anisotropic (ellipsoid-space) distance from the target location to any neighbour.",
+                "examples": [
+                  {
+                    "name": "MinAD",
+                    "operation": "create"
+                  }
+                ],
+                "oneOf": [
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "name": {
+                        "description": "The name of the attribute to create.",
+                        "title": "Name",
+                        "type": "string"
+                      },
+                      "operation": {
+                        "const": "create",
+                        "description": "The operation to perform on the attribute.",
+                        "title": "Operation"
+                      }
+                    },
+                    "required": [
+                      "operation",
+                      "name"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "operation": {
+                        "const": "update",
+                        "description": "The operation to perform on the attribute.",
+                        "title": "Operation"
+                      },
+                      "reference": {
+                        "attribute_from": "3/object",
+                        "attribute_path": {
+                          "block-model/[>=1.0,<2]": [
+                            "attributes[?attribute_type=='Float64']"
+                          ],
+                          "downhole-intervals/[>=1.2,<2]": [
+                            "attributes[?attribute_type=='scalar']"
+                          ],
+                          "pointset/[>=1.2,<2]": [
+                            "locations.attributes[?attribute_type=='scalar']"
+                          ],
+                          "regular-3d-grid/[>=1.2,<2]": [
+                            "cell_attributes[?attribute_type=='scalar']"
+                          ],
+                          "regular-masked-3d-grid/[>=1.2,<2]": [
+                            "cell_attributes[?attribute_type=='scalar']"
+                          ],
+                          "tensor-3d-grid/[>=1.2,<2]": [
+                            "cell_attributes[?attribute_type=='scalar']"
+                          ]
+                        },
+                        "description": "Reference to an existing attribute to update.",
+                        "reference_to": "attribute",
+                        "title": "Reference",
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "operation",
+                      "reference"
+                    ],
+                    "type": "object"
+                  }
+                ],
+                "target": "attribute",
+                "title": "Anisotropic Minimum Distance"
+              },
+              "kriging_efficiency": {
+                "description": "Attribute to create or update with the proportion of point or intra-block variance explained by the kriging weights.",
+                "examples": [
+                  {
+                    "name": "KE",
+                    "operation": "create"
+                  }
+                ],
+                "oneOf": [
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "name": {
+                        "description": "The name of the attribute to create.",
+                        "title": "Name",
+                        "type": "string"
+                      },
+                      "operation": {
+                        "const": "create",
+                        "description": "The operation to perform on the attribute.",
+                        "title": "Operation"
+                      }
+                    },
+                    "required": [
+                      "operation",
+                      "name"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "operation": {
+                        "const": "update",
+                        "description": "The operation to perform on the attribute.",
+                        "title": "Operation"
+                      },
+                      "reference": {
+                        "attribute_from": "3/object",
+                        "attribute_path": {
+                          "block-model/[>=1.0,<2]": [
+                            "attributes[?attribute_type=='Float64']"
+                          ],
+                          "downhole-intervals/[>=1.2,<2]": [
+                            "attributes[?attribute_type=='scalar']"
+                          ],
+                          "pointset/[>=1.2,<2]": [
+                            "locations.attributes[?attribute_type=='scalar']"
+                          ],
+                          "regular-3d-grid/[>=1.2,<2]": [
+                            "cell_attributes[?attribute_type=='scalar']"
+                          ],
+                          "regular-masked-3d-grid/[>=1.2,<2]": [
+                            "cell_attributes[?attribute_type=='scalar']"
+                          ],
+                          "tensor-3d-grid/[>=1.2,<2]": [
+                            "cell_attributes[?attribute_type=='scalar']"
+                          ]
+                        },
+                        "description": "Reference to an existing attribute to update.",
+                        "reference_to": "attribute",
+                        "title": "Reference",
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "operation",
+                      "reference"
+                    ],
+                    "type": "object"
+                  }
+                ],
+                "target": "attribute",
+                "title": "Kriging Efficiency"
+              },
+              "kriging_mean": {
+                "description": "Attribute to create or update with the GLS mean for ordinary kriging, or the supplied constant mean for simple kriging.",
+                "examples": [
+                  {
+                    "name": "KM",
+                    "operation": "create"
+                  }
+                ],
+                "oneOf": [
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "name": {
+                        "description": "The name of the attribute to create.",
+                        "title": "Name",
+                        "type": "string"
+                      },
+                      "operation": {
+                        "const": "create",
+                        "description": "The operation to perform on the attribute.",
+                        "title": "Operation"
+                      }
+                    },
+                    "required": [
+                      "operation",
+                      "name"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "operation": {
+                        "const": "update",
+                        "description": "The operation to perform on the attribute.",
+                        "title": "Operation"
+                      },
+                      "reference": {
+                        "attribute_from": "3/object",
+                        "attribute_path": {
+                          "block-model/[>=1.0,<2]": [
+                            "attributes[?attribute_type=='Float64']"
+                          ],
+                          "downhole-intervals/[>=1.2,<2]": [
+                            "attributes[?attribute_type=='scalar']"
+                          ],
+                          "pointset/[>=1.2,<2]": [
+                            "locations.attributes[?attribute_type=='scalar']"
+                          ],
+                          "regular-3d-grid/[>=1.2,<2]": [
+                            "cell_attributes[?attribute_type=='scalar']"
+                          ],
+                          "regular-masked-3d-grid/[>=1.2,<2]": [
+                            "cell_attributes[?attribute_type=='scalar']"
+                          ],
+                          "tensor-3d-grid/[>=1.2,<2]": [
+                            "cell_attributes[?attribute_type=='scalar']"
+                          ]
+                        },
+                        "description": "Reference to an existing attribute to update.",
+                        "reference_to": "attribute",
+                        "title": "Reference",
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "operation",
+                      "reference"
+                    ],
+                    "type": "object"
+                  }
+                ],
+                "target": "attribute",
+                "title": "Kriging Mean"
+              },
+              "kriging_variance": {
+                "description": "Attribute to create or update with the kriging variance (estimation uncertainty).",
+                "examples": [
+                  {
+                    "name": "KV",
+                    "operation": "create"
+                  }
+                ],
+                "oneOf": [
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "name": {
+                        "description": "The name of the attribute to create.",
+                        "title": "Name",
+                        "type": "string"
+                      },
+                      "operation": {
+                        "const": "create",
+                        "description": "The operation to perform on the attribute.",
+                        "title": "Operation"
+                      }
+                    },
+                    "required": [
+                      "operation",
+                      "name"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "operation": {
+                        "const": "update",
+                        "description": "The operation to perform on the attribute.",
+                        "title": "Operation"
+                      },
+                      "reference": {
+                        "attribute_from": "3/object",
+                        "attribute_path": {
+                          "block-model/[>=1.0,<2]": [
+                            "attributes[?attribute_type=='Float64']"
+                          ],
+                          "downhole-intervals/[>=1.2,<2]": [
+                            "attributes[?attribute_type=='scalar']"
+                          ],
+                          "pointset/[>=1.2,<2]": [
+                            "locations.attributes[?attribute_type=='scalar']"
+                          ],
+                          "regular-3d-grid/[>=1.2,<2]": [
+                            "cell_attributes[?attribute_type=='scalar']"
+                          ],
+                          "regular-masked-3d-grid/[>=1.2,<2]": [
+                            "cell_attributes[?attribute_type=='scalar']"
+                          ],
+                          "tensor-3d-grid/[>=1.2,<2]": [
+                            "cell_attributes[?attribute_type=='scalar']"
+                          ]
+                        },
+                        "description": "Reference to an existing attribute to update.",
+                        "reference_to": "attribute",
+                        "title": "Reference",
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "operation",
+                      "reference"
+                    ],
+                    "type": "object"
+                  }
+                ],
+                "target": "attribute",
+                "title": "Kriging Variance"
+              },
+              "mean_distance": {
+                "description": "Attribute to create or update with the mean isotropic Euclidean distance from the target location to all neighbours.",
+                "examples": [
+                  {
+                    "name": "AvgD",
+                    "operation": "create"
+                  }
+                ],
+                "oneOf": [
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "name": {
+                        "description": "The name of the attribute to create.",
+                        "title": "Name",
+                        "type": "string"
+                      },
+                      "operation": {
+                        "const": "create",
+                        "description": "The operation to perform on the attribute.",
+                        "title": "Operation"
+                      }
+                    },
+                    "required": [
+                      "operation",
+                      "name"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "operation": {
+                        "const": "update",
+                        "description": "The operation to perform on the attribute.",
+                        "title": "Operation"
+                      },
+                      "reference": {
+                        "attribute_from": "3/object",
+                        "attribute_path": {
+                          "block-model/[>=1.0,<2]": [
+                            "attributes[?attribute_type=='Float64']"
+                          ],
+                          "downhole-intervals/[>=1.2,<2]": [
+                            "attributes[?attribute_type=='scalar']"
+                          ],
+                          "pointset/[>=1.2,<2]": [
+                            "locations.attributes[?attribute_type=='scalar']"
+                          ],
+                          "regular-3d-grid/[>=1.2,<2]": [
+                            "cell_attributes[?attribute_type=='scalar']"
+                          ],
+                          "regular-masked-3d-grid/[>=1.2,<2]": [
+                            "cell_attributes[?attribute_type=='scalar']"
+                          ],
+                          "tensor-3d-grid/[>=1.2,<2]": [
+                            "cell_attributes[?attribute_type=='scalar']"
+                          ]
+                        },
+                        "description": "Reference to an existing attribute to update.",
+                        "reference_to": "attribute",
+                        "title": "Reference",
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "operation",
+                      "reference"
+                    ],
+                    "type": "object"
+                  }
+                ],
+                "target": "attribute",
+                "title": "Mean Distance"
+              },
+              "min_distance": {
+                "description": "Attribute to create or update with the minimum isotropic Euclidean distance from the target location to any neighbour.",
+                "examples": [
+                  {
+                    "name": "MinD",
+                    "operation": "create"
+                  }
+                ],
+                "oneOf": [
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "name": {
+                        "description": "The name of the attribute to create.",
+                        "title": "Name",
+                        "type": "string"
+                      },
+                      "operation": {
+                        "const": "create",
+                        "description": "The operation to perform on the attribute.",
+                        "title": "Operation"
+                      }
+                    },
+                    "required": [
+                      "operation",
+                      "name"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "operation": {
+                        "const": "update",
+                        "description": "The operation to perform on the attribute.",
+                        "title": "Operation"
+                      },
+                      "reference": {
+                        "attribute_from": "3/object",
+                        "attribute_path": {
+                          "block-model/[>=1.0,<2]": [
+                            "attributes[?attribute_type=='Float64']"
+                          ],
+                          "downhole-intervals/[>=1.2,<2]": [
+                            "attributes[?attribute_type=='scalar']"
+                          ],
+                          "pointset/[>=1.2,<2]": [
+                            "locations.attributes[?attribute_type=='scalar']"
+                          ],
+                          "regular-3d-grid/[>=1.2,<2]": [
+                            "cell_attributes[?attribute_type=='scalar']"
+                          ],
+                          "regular-masked-3d-grid/[>=1.2,<2]": [
+                            "cell_attributes[?attribute_type=='scalar']"
+                          ],
+                          "tensor-3d-grid/[>=1.2,<2]": [
+                            "cell_attributes[?attribute_type=='scalar']"
+                          ]
+                        },
+                        "description": "Reference to an existing attribute to update.",
+                        "reference_to": "attribute",
+                        "title": "Reference",
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "operation",
+                      "reference"
+                    ],
+                    "type": "object"
+                  }
+                ],
+                "target": "attribute",
+                "title": "Minimum Distance"
+              },
+              "num_drillholes": {
+                "description": "Attribute to create or update with the number of distinct drillholes contributing to the estimate. Requires a DownholeIntervals source object.",
+                "examples": [
+                  {
+                    "name": "NDh",
+                    "operation": "create"
+                  }
+                ],
+                "oneOf": [
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "name": {
+                        "description": "The name of the attribute to create.",
+                        "title": "Name",
+                        "type": "string"
+                      },
+                      "operation": {
+                        "const": "create",
+                        "description": "The operation to perform on the attribute.",
+                        "title": "Operation"
+                      }
+                    },
+                    "required": [
+                      "operation",
+                      "name"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "operation": {
+                        "const": "update",
+                        "description": "The operation to perform on the attribute.",
+                        "title": "Operation"
+                      },
+                      "reference": {
+                        "attribute_from": "3/object",
+                        "attribute_path": {
+                          "block-model/[>=1.0,<2]": [
+                            "attributes[?attribute_type=='Int8'||attribute_type=='Int16'||attribute_type=='Int32'||attribute_type=='Int64'||attribute_type=='UInt8'||attribute_type=='UInt16'||attribute_type=='UInt32'||attribute_type=='UInt64']"
+                          ],
+                          "downhole-intervals/[>=1.2,<2]": [
+                            "attributes[?attribute_type=='integer']"
+                          ],
+                          "pointset/[>=1.2,<2]": [
+                            "locations.attributes[?attribute_type=='integer']"
+                          ],
+                          "regular-3d-grid/[>=1.2,<2]": [
+                            "cell_attributes[?attribute_type=='integer']"
+                          ],
+                          "regular-masked-3d-grid/[>=1.2,<2]": [
+                            "cell_attributes[?attribute_type=='integer']"
+                          ],
+                          "tensor-3d-grid/[>=1.2,<2]": [
+                            "cell_attributes[?attribute_type=='integer']"
+                          ]
+                        },
+                        "description": "Reference to an existing attribute to update.",
+                        "reference_to": "attribute",
+                        "title": "Reference",
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "operation",
+                      "reference"
+                    ],
+                    "type": "object"
+                  }
+                ],
+                "target": "attribute",
+                "title": "Number of Drillholes"
+              },
+              "num_duplicates": {
+                "description": "Attribute to create or update with the number of duplicate sample locations used in the estimate.",
+                "examples": [
+                  {
+                    "name": "ND",
+                    "operation": "create"
+                  }
+                ],
+                "oneOf": [
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "name": {
+                        "description": "The name of the attribute to create.",
+                        "title": "Name",
+                        "type": "string"
+                      },
+                      "operation": {
+                        "const": "create",
+                        "description": "The operation to perform on the attribute.",
+                        "title": "Operation"
+                      }
+                    },
+                    "required": [
+                      "operation",
+                      "name"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "operation": {
+                        "const": "update",
+                        "description": "The operation to perform on the attribute.",
+                        "title": "Operation"
+                      },
+                      "reference": {
+                        "attribute_from": "3/object",
+                        "attribute_path": {
+                          "block-model/[>=1.0,<2]": [
+                            "attributes[?attribute_type=='Int8'||attribute_type=='Int16'||attribute_type=='Int32'||attribute_type=='Int64'||attribute_type=='UInt8'||attribute_type=='UInt16'||attribute_type=='UInt32'||attribute_type=='UInt64']"
+                          ],
+                          "downhole-intervals/[>=1.2,<2]": [
+                            "attributes[?attribute_type=='integer']"
+                          ],
+                          "pointset/[>=1.2,<2]": [
+                            "locations.attributes[?attribute_type=='integer']"
+                          ],
+                          "regular-3d-grid/[>=1.2,<2]": [
+                            "cell_attributes[?attribute_type=='integer']"
+                          ],
+                          "regular-masked-3d-grid/[>=1.2,<2]": [
+                            "cell_attributes[?attribute_type=='integer']"
+                          ],
+                          "tensor-3d-grid/[>=1.2,<2]": [
+                            "cell_attributes[?attribute_type=='integer']"
+                          ]
+                        },
+                        "description": "Reference to an existing attribute to update.",
+                        "reference_to": "attribute",
+                        "title": "Reference",
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "operation",
+                      "reference"
+                    ],
+                    "type": "object"
+                  }
+                ],
+                "target": "attribute",
+                "title": "Number of Duplicates"
+              },
+              "num_equidistant": {
+                "description": "Attribute to create or update with a hint of how many other samples could have replaced the last returned sample because they were the same distance from the target location. This is counted after searching and before clipping to the maximum number of samples.",
+                "examples": [
+                  {
+                    "name": "NeD",
+                    "operation": "create"
+                  }
+                ],
+                "oneOf": [
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "name": {
+                        "description": "The name of the attribute to create.",
+                        "title": "Name",
+                        "type": "string"
+                      },
+                      "operation": {
+                        "const": "create",
+                        "description": "The operation to perform on the attribute.",
+                        "title": "Operation"
+                      }
+                    },
+                    "required": [
+                      "operation",
+                      "name"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "operation": {
+                        "const": "update",
+                        "description": "The operation to perform on the attribute.",
+                        "title": "Operation"
+                      },
+                      "reference": {
+                        "attribute_from": "3/object",
+                        "attribute_path": {
+                          "block-model/[>=1.0,<2]": [
+                            "attributes[?attribute_type=='Int8'||attribute_type=='Int16'||attribute_type=='Int32'||attribute_type=='Int64'||attribute_type=='UInt8'||attribute_type=='UInt16'||attribute_type=='UInt32'||attribute_type=='UInt64']"
+                          ],
+                          "downhole-intervals/[>=1.2,<2]": [
+                            "attributes[?attribute_type=='integer']"
+                          ],
+                          "pointset/[>=1.2,<2]": [
+                            "locations.attributes[?attribute_type=='integer']"
+                          ],
+                          "regular-3d-grid/[>=1.2,<2]": [
+                            "cell_attributes[?attribute_type=='integer']"
+                          ],
+                          "regular-masked-3d-grid/[>=1.2,<2]": [
+                            "cell_attributes[?attribute_type=='integer']"
+                          ],
+                          "tensor-3d-grid/[>=1.2,<2]": [
+                            "cell_attributes[?attribute_type=='integer']"
+                          ]
+                        },
+                        "description": "Reference to an existing attribute to update.",
+                        "reference_to": "attribute",
+                        "title": "Reference",
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "operation",
+                      "reference"
+                    ],
+                    "type": "object"
+                  }
+                ],
+                "target": "attribute",
+                "title": "Number of Equidistant Samples"
+              },
+              "num_samples": {
+                "description": "Attribute to create or update with the number of data samples used in the estimate.",
+                "examples": [
+                  {
+                    "name": "NS",
+                    "operation": "create"
+                  }
+                ],
+                "oneOf": [
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "name": {
+                        "description": "The name of the attribute to create.",
+                        "title": "Name",
+                        "type": "string"
+                      },
+                      "operation": {
+                        "const": "create",
+                        "description": "The operation to perform on the attribute.",
+                        "title": "Operation"
+                      }
+                    },
+                    "required": [
+                      "operation",
+                      "name"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "operation": {
+                        "const": "update",
+                        "description": "The operation to perform on the attribute.",
+                        "title": "Operation"
+                      },
+                      "reference": {
+                        "attribute_from": "3/object",
+                        "attribute_path": {
+                          "block-model/[>=1.0,<2]": [
+                            "attributes[?attribute_type=='Int8'||attribute_type=='Int16'||attribute_type=='Int32'||attribute_type=='Int64'||attribute_type=='UInt8'||attribute_type=='UInt16'||attribute_type=='UInt32'||attribute_type=='UInt64']"
+                          ],
+                          "downhole-intervals/[>=1.2,<2]": [
+                            "attributes[?attribute_type=='integer']"
+                          ],
+                          "pointset/[>=1.2,<2]": [
+                            "locations.attributes[?attribute_type=='integer']"
+                          ],
+                          "regular-3d-grid/[>=1.2,<2]": [
+                            "cell_attributes[?attribute_type=='integer']"
+                          ],
+                          "regular-masked-3d-grid/[>=1.2,<2]": [
+                            "cell_attributes[?attribute_type=='integer']"
+                          ],
+                          "tensor-3d-grid/[>=1.2,<2]": [
+                            "cell_attributes[?attribute_type=='integer']"
+                          ]
+                        },
+                        "description": "Reference to an existing attribute to update.",
+                        "reference_to": "attribute",
+                        "title": "Reference",
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "operation",
+                      "reference"
+                    ],
+                    "type": "object"
+                  }
+                ],
+                "target": "attribute",
+                "title": "Number of Samples"
+              },
+              "slope_of_regression": {
+                "description": "Attribute to create or update with the slope of regression, a diagnostic for conditional bias.",
+                "examples": [
+                  {
+                    "name": "SoR",
+                    "operation": "create"
+                  }
+                ],
+                "oneOf": [
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "name": {
+                        "description": "The name of the attribute to create.",
+                        "title": "Name",
+                        "type": "string"
+                      },
+                      "operation": {
+                        "const": "create",
+                        "description": "The operation to perform on the attribute.",
+                        "title": "Operation"
+                      }
+                    },
+                    "required": [
+                      "operation",
+                      "name"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "operation": {
+                        "const": "update",
+                        "description": "The operation to perform on the attribute.",
+                        "title": "Operation"
+                      },
+                      "reference": {
+                        "attribute_from": "3/object",
+                        "attribute_path": {
+                          "block-model/[>=1.0,<2]": [
+                            "attributes[?attribute_type=='Float64']"
+                          ],
+                          "downhole-intervals/[>=1.2,<2]": [
+                            "attributes[?attribute_type=='scalar']"
+                          ],
+                          "pointset/[>=1.2,<2]": [
+                            "locations.attributes[?attribute_type=='scalar']"
+                          ],
+                          "regular-3d-grid/[>=1.2,<2]": [
+                            "cell_attributes[?attribute_type=='scalar']"
+                          ],
+                          "regular-masked-3d-grid/[>=1.2,<2]": [
+                            "cell_attributes[?attribute_type=='scalar']"
+                          ],
+                          "tensor-3d-grid/[>=1.2,<2]": [
+                            "cell_attributes[?attribute_type=='scalar']"
+                          ]
+                        },
+                        "description": "Reference to an existing attribute to update.",
+                        "reference_to": "attribute",
+                        "title": "Reference",
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "operation",
+                      "reference"
+                    ],
+                    "type": "object"
+                  }
+                ],
+                "target": "attribute",
+                "title": "Slope of Regression"
+              },
+              "sum_negative_weights": {
+                "description": "Attribute to create or update with the sum of negative kriging weights applied to data samples (zero when negative-weight removal is enabled).",
+                "examples": [
+                  {
+                    "name": "SumN",
+                    "operation": "create"
+                  }
+                ],
+                "oneOf": [
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "name": {
+                        "description": "The name of the attribute to create.",
+                        "title": "Name",
+                        "type": "string"
+                      },
+                      "operation": {
+                        "const": "create",
+                        "description": "The operation to perform on the attribute.",
+                        "title": "Operation"
+                      }
+                    },
+                    "required": [
+                      "operation",
+                      "name"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "operation": {
+                        "const": "update",
+                        "description": "The operation to perform on the attribute.",
+                        "title": "Operation"
+                      },
+                      "reference": {
+                        "attribute_from": "3/object",
+                        "attribute_path": {
+                          "block-model/[>=1.0,<2]": [
+                            "attributes[?attribute_type=='Float64']"
+                          ],
+                          "downhole-intervals/[>=1.2,<2]": [
+                            "attributes[?attribute_type=='scalar']"
+                          ],
+                          "pointset/[>=1.2,<2]": [
+                            "locations.attributes[?attribute_type=='scalar']"
+                          ],
+                          "regular-3d-grid/[>=1.2,<2]": [
+                            "cell_attributes[?attribute_type=='scalar']"
+                          ],
+                          "regular-masked-3d-grid/[>=1.2,<2]": [
+                            "cell_attributes[?attribute_type=='scalar']"
+                          ],
+                          "tensor-3d-grid/[>=1.2,<2]": [
+                            "cell_attributes[?attribute_type=='scalar']"
+                          ]
+                        },
+                        "description": "Reference to an existing attribute to update.",
+                        "reference_to": "attribute",
+                        "title": "Reference",
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "operation",
+                      "reference"
+                    ],
+                    "type": "object"
+                  }
+                ],
+                "target": "attribute",
+                "title": "Sum of Negative Weights"
+              },
+              "sum_positive_weights": {
+                "description": "Attribute to create or update with the sum of positive kriging weights applied to data samples.",
+                "examples": [
+                  {
+                    "name": "SumP",
+                    "operation": "create"
+                  }
+                ],
+                "oneOf": [
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "name": {
+                        "description": "The name of the attribute to create.",
+                        "title": "Name",
+                        "type": "string"
+                      },
+                      "operation": {
+                        "const": "create",
+                        "description": "The operation to perform on the attribute.",
+                        "title": "Operation"
+                      }
+                    },
+                    "required": [
+                      "operation",
+                      "name"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "operation": {
+                        "const": "update",
+                        "description": "The operation to perform on the attribute.",
+                        "title": "Operation"
+                      },
+                      "reference": {
+                        "attribute_from": "3/object",
+                        "attribute_path": {
+                          "block-model/[>=1.0,<2]": [
+                            "attributes[?attribute_type=='Float64']"
+                          ],
+                          "downhole-intervals/[>=1.2,<2]": [
+                            "attributes[?attribute_type=='scalar']"
+                          ],
+                          "pointset/[>=1.2,<2]": [
+                            "locations.attributes[?attribute_type=='scalar']"
+                          ],
+                          "regular-3d-grid/[>=1.2,<2]": [
+                            "cell_attributes[?attribute_type=='scalar']"
+                          ],
+                          "regular-masked-3d-grid/[>=1.2,<2]": [
+                            "cell_attributes[?attribute_type=='scalar']"
+                          ],
+                          "tensor-3d-grid/[>=1.2,<2]": [
+                            "cell_attributes[?attribute_type=='scalar']"
+                          ]
+                        },
+                        "description": "Reference to an existing attribute to update.",
+                        "reference_to": "attribute",
+                        "title": "Reference",
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "operation",
+                      "reference"
+                    ],
+                    "type": "object"
+                  }
+                ],
+                "target": "attribute",
+                "title": "Sum of Positive Weights"
+              },
+              "sum_weights": {
+                "description": "Attribute to create or update with the sum of kriging weights applied to data samples.",
+                "examples": [
+                  {
+                    "name": "Sum",
+                    "operation": "create"
+                  }
+                ],
+                "oneOf": [
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "name": {
+                        "description": "The name of the attribute to create.",
+                        "title": "Name",
+                        "type": "string"
+                      },
+                      "operation": {
+                        "const": "create",
+                        "description": "The operation to perform on the attribute.",
+                        "title": "Operation"
+                      }
+                    },
+                    "required": [
+                      "operation",
+                      "name"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "operation": {
+                        "const": "update",
+                        "description": "The operation to perform on the attribute.",
+                        "title": "Operation"
+                      },
+                      "reference": {
+                        "attribute_from": "3/object",
+                        "attribute_path": {
+                          "block-model/[>=1.0,<2]": [
+                            "attributes[?attribute_type=='Float64']"
+                          ],
+                          "downhole-intervals/[>=1.2,<2]": [
+                            "attributes[?attribute_type=='scalar']"
+                          ],
+                          "pointset/[>=1.2,<2]": [
+                            "locations.attributes[?attribute_type=='scalar']"
+                          ],
+                          "regular-3d-grid/[>=1.2,<2]": [
+                            "cell_attributes[?attribute_type=='scalar']"
+                          ],
+                          "regular-masked-3d-grid/[>=1.2,<2]": [
+                            "cell_attributes[?attribute_type=='scalar']"
+                          ],
+                          "tensor-3d-grid/[>=1.2,<2]": [
+                            "cell_attributes[?attribute_type=='scalar']"
+                          ]
+                        },
+                        "description": "Reference to an existing attribute to update.",
+                        "reference_to": "attribute",
+                        "title": "Reference",
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "operation",
+                      "reference"
+                    ],
+                    "type": "object"
+                  }
+                ],
+                "target": "attribute",
+                "title": "Sum of Weights"
+              },
+              "valid": {
+                "description": "Attribute to create or update with whether each target location's neighbourhood satisfied the search constraints and produced an estimate.",
+                "examples": [
+                  {
+                    "name": "valid",
+                    "operation": "create"
+                  }
+                ],
+                "oneOf": [
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "name": {
+                        "description": "The name of the attribute to create.",
+                        "title": "Name",
+                        "type": "string"
+                      },
+                      "operation": {
+                        "const": "create",
+                        "description": "The operation to perform on the attribute.",
+                        "title": "Operation"
+                      }
+                    },
+                    "required": [
+                      "operation",
+                      "name"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "operation": {
+                        "const": "update",
+                        "description": "The operation to perform on the attribute.",
+                        "title": "Operation"
+                      },
+                      "reference": {
+                        "attribute_from": "3/object",
+                        "attribute_path": {
+                          "block-model/[>=1.0,<2]": [
+                            "attributes[?attribute_type=='Boolean']"
+                          ],
+                          "downhole-intervals/[>=1.2,<2]": [
+                            "attributes[?attribute_type=='bool']"
+                          ],
+                          "pointset/[>=1.2,<2]": [
+                            "locations.attributes[?attribute_type=='bool']"
+                          ],
+                          "regular-3d-grid/[>=1.2,<2]": [
+                            "cell_attributes[?attribute_type=='bool']"
+                          ],
+                          "regular-masked-3d-grid/[>=1.2,<2]": [
+                            "cell_attributes[?attribute_type=='bool']"
+                          ],
+                          "tensor-3d-grid/[>=1.2,<2]": [
+                            "cell_attributes[?attribute_type=='bool']"
+                          ]
+                        },
+                        "description": "Reference to an existing attribute to update.",
+                        "reference_to": "attribute",
+                        "title": "Reference",
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "operation",
+                      "reference"
+                    ],
+                    "type": "object"
+                  }
+                ],
+                "target": "attribute",
+                "title": "Valid"
               }
-            ],
-            "target": "attribute",
-            "title": "Kriging Efficiency"
+            },
+            "required": [],
+            "title": "Diagnostics",
+            "type": [
+              "object",
+              "null"
+            ]
           },
           "filter": {
             "additionalProperties": false,
@@ -1448,420 +2470,6 @@
               "null"
             ]
           },
-          "mean_attribute": {
-            "description": "Attribute to create or update with the GLS mean for ordinary kriging, or the supplied constant mean for simple kriging.",
-            "oneOf": [
-              {
-                "additionalProperties": false,
-                "properties": {
-                  "name": {
-                    "description": "The name of the attribute to create.",
-                    "title": "Name",
-                    "type": "string"
-                  },
-                  "operation": {
-                    "const": "create",
-                    "description": "The operation to perform on the attribute.",
-                    "title": "Operation"
-                  }
-                },
-                "required": [
-                  "operation",
-                  "name"
-                ],
-                "type": "object"
-              },
-              {
-                "additionalProperties": false,
-                "properties": {
-                  "operation": {
-                    "const": "update",
-                    "description": "The operation to perform on the attribute.",
-                    "title": "Operation"
-                  },
-                  "reference": {
-                    "attribute_from": "2/object",
-                    "attribute_path": {
-                      "block-model/[>=1.0,<2]": [
-                        "attributes[?attribute_type=='Float64']"
-                      ],
-                      "downhole-intervals/[>=1.2,<2]": [
-                        "attributes[?attribute_type=='scalar']"
-                      ],
-                      "pointset/[>=1.2,<2]": [
-                        "locations.attributes[?attribute_type=='scalar']"
-                      ],
-                      "regular-3d-grid/[>=1.2,<2]": [
-                        "cell_attributes[?attribute_type=='scalar']"
-                      ],
-                      "regular-masked-3d-grid/[>=1.2,<2]": [
-                        "cell_attributes[?attribute_type=='scalar']"
-                      ],
-                      "tensor-3d-grid/[>=1.2,<2]": [
-                        "cell_attributes[?attribute_type=='scalar']"
-                      ]
-                    },
-                    "description": "Reference to an existing attribute to update.",
-                    "reference_to": "attribute",
-                    "title": "Reference",
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "operation",
-                  "reference"
-                ],
-                "type": "object"
-              }
-            ],
-            "target": "attribute",
-            "title": "Kriging Mean"
-          },
-          "mean_distance_attribute": {
-            "description": "Attribute to create or update with the mean isotropic Euclidean distance from query point to all neighbours.",
-            "oneOf": [
-              {
-                "additionalProperties": false,
-                "properties": {
-                  "name": {
-                    "description": "The name of the attribute to create.",
-                    "title": "Name",
-                    "type": "string"
-                  },
-                  "operation": {
-                    "const": "create",
-                    "description": "The operation to perform on the attribute.",
-                    "title": "Operation"
-                  }
-                },
-                "required": [
-                  "operation",
-                  "name"
-                ],
-                "type": "object"
-              },
-              {
-                "additionalProperties": false,
-                "properties": {
-                  "operation": {
-                    "const": "update",
-                    "description": "The operation to perform on the attribute.",
-                    "title": "Operation"
-                  },
-                  "reference": {
-                    "attribute_from": "2/object",
-                    "attribute_path": {
-                      "block-model/[>=1.0,<2]": [
-                        "attributes[?attribute_type=='Float64']"
-                      ],
-                      "downhole-intervals/[>=1.2,<2]": [
-                        "attributes[?attribute_type=='scalar']"
-                      ],
-                      "pointset/[>=1.2,<2]": [
-                        "locations.attributes[?attribute_type=='scalar']"
-                      ],
-                      "regular-3d-grid/[>=1.2,<2]": [
-                        "cell_attributes[?attribute_type=='scalar']"
-                      ],
-                      "regular-masked-3d-grid/[>=1.2,<2]": [
-                        "cell_attributes[?attribute_type=='scalar']"
-                      ],
-                      "tensor-3d-grid/[>=1.2,<2]": [
-                        "cell_attributes[?attribute_type=='scalar']"
-                      ]
-                    },
-                    "description": "Reference to an existing attribute to update.",
-                    "reference_to": "attribute",
-                    "title": "Reference",
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "operation",
-                  "reference"
-                ],
-                "type": "object"
-              }
-            ],
-            "target": "attribute",
-            "title": "Mean Distance"
-          },
-          "min_distance_attribute": {
-            "description": "Attribute to create or update with the minimum isotropic Euclidean distance from query point to any neighbour.",
-            "oneOf": [
-              {
-                "additionalProperties": false,
-                "properties": {
-                  "name": {
-                    "description": "The name of the attribute to create.",
-                    "title": "Name",
-                    "type": "string"
-                  },
-                  "operation": {
-                    "const": "create",
-                    "description": "The operation to perform on the attribute.",
-                    "title": "Operation"
-                  }
-                },
-                "required": [
-                  "operation",
-                  "name"
-                ],
-                "type": "object"
-              },
-              {
-                "additionalProperties": false,
-                "properties": {
-                  "operation": {
-                    "const": "update",
-                    "description": "The operation to perform on the attribute.",
-                    "title": "Operation"
-                  },
-                  "reference": {
-                    "attribute_from": "2/object",
-                    "attribute_path": {
-                      "block-model/[>=1.0,<2]": [
-                        "attributes[?attribute_type=='Float64']"
-                      ],
-                      "downhole-intervals/[>=1.2,<2]": [
-                        "attributes[?attribute_type=='scalar']"
-                      ],
-                      "pointset/[>=1.2,<2]": [
-                        "locations.attributes[?attribute_type=='scalar']"
-                      ],
-                      "regular-3d-grid/[>=1.2,<2]": [
-                        "cell_attributes[?attribute_type=='scalar']"
-                      ],
-                      "regular-masked-3d-grid/[>=1.2,<2]": [
-                        "cell_attributes[?attribute_type=='scalar']"
-                      ],
-                      "tensor-3d-grid/[>=1.2,<2]": [
-                        "cell_attributes[?attribute_type=='scalar']"
-                      ]
-                    },
-                    "description": "Reference to an existing attribute to update.",
-                    "reference_to": "attribute",
-                    "title": "Reference",
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "operation",
-                  "reference"
-                ],
-                "type": "object"
-              }
-            ],
-            "target": "attribute",
-            "title": "Minimum Distance"
-          },
-          "num_drillholes_attribute": {
-            "description": "Attribute to create or update with the number of distinct drillholes contributing to the estimate. Requires a DownholeIntervals source object.",
-            "oneOf": [
-              {
-                "additionalProperties": false,
-                "properties": {
-                  "name": {
-                    "description": "The name of the attribute to create.",
-                    "title": "Name",
-                    "type": "string"
-                  },
-                  "operation": {
-                    "const": "create",
-                    "description": "The operation to perform on the attribute.",
-                    "title": "Operation"
-                  }
-                },
-                "required": [
-                  "operation",
-                  "name"
-                ],
-                "type": "object"
-              },
-              {
-                "additionalProperties": false,
-                "properties": {
-                  "operation": {
-                    "const": "update",
-                    "description": "The operation to perform on the attribute.",
-                    "title": "Operation"
-                  },
-                  "reference": {
-                    "attribute_from": "2/object",
-                    "attribute_path": {
-                      "block-model/[>=1.0,<2]": [
-                        "attributes[?attribute_type=='Int8'||attribute_type=='Int16'||attribute_type=='Int32'||attribute_type=='Int64'||attribute_type=='UInt8'||attribute_type=='UInt16'||attribute_type=='UInt32'||attribute_type=='UInt64']"
-                      ],
-                      "downhole-intervals/[>=1.2,<2]": [
-                        "attributes[?attribute_type=='integer']"
-                      ],
-                      "pointset/[>=1.2,<2]": [
-                        "locations.attributes[?attribute_type=='integer']"
-                      ],
-                      "regular-3d-grid/[>=1.2,<2]": [
-                        "cell_attributes[?attribute_type=='integer']"
-                      ],
-                      "regular-masked-3d-grid/[>=1.2,<2]": [
-                        "cell_attributes[?attribute_type=='integer']"
-                      ],
-                      "tensor-3d-grid/[>=1.2,<2]": [
-                        "cell_attributes[?attribute_type=='integer']"
-                      ]
-                    },
-                    "description": "Reference to an existing attribute to update.",
-                    "reference_to": "attribute",
-                    "title": "Reference",
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "operation",
-                  "reference"
-                ],
-                "type": "object"
-              }
-            ],
-            "target": "attribute",
-            "title": "Number of Drillholes"
-          },
-          "num_duplicates_attribute": {
-            "description": "Attribute to create or update with the number of duplicate sample locations used in the estimate.",
-            "oneOf": [
-              {
-                "additionalProperties": false,
-                "properties": {
-                  "name": {
-                    "description": "The name of the attribute to create.",
-                    "title": "Name",
-                    "type": "string"
-                  },
-                  "operation": {
-                    "const": "create",
-                    "description": "The operation to perform on the attribute.",
-                    "title": "Operation"
-                  }
-                },
-                "required": [
-                  "operation",
-                  "name"
-                ],
-                "type": "object"
-              },
-              {
-                "additionalProperties": false,
-                "properties": {
-                  "operation": {
-                    "const": "update",
-                    "description": "The operation to perform on the attribute.",
-                    "title": "Operation"
-                  },
-                  "reference": {
-                    "attribute_from": "2/object",
-                    "attribute_path": {
-                      "block-model/[>=1.0,<2]": [
-                        "attributes[?attribute_type=='Int8'||attribute_type=='Int16'||attribute_type=='Int32'||attribute_type=='Int64'||attribute_type=='UInt8'||attribute_type=='UInt16'||attribute_type=='UInt32'||attribute_type=='UInt64']"
-                      ],
-                      "downhole-intervals/[>=1.2,<2]": [
-                        "attributes[?attribute_type=='integer']"
-                      ],
-                      "pointset/[>=1.2,<2]": [
-                        "locations.attributes[?attribute_type=='integer']"
-                      ],
-                      "regular-3d-grid/[>=1.2,<2]": [
-                        "cell_attributes[?attribute_type=='integer']"
-                      ],
-                      "regular-masked-3d-grid/[>=1.2,<2]": [
-                        "cell_attributes[?attribute_type=='integer']"
-                      ],
-                      "tensor-3d-grid/[>=1.2,<2]": [
-                        "cell_attributes[?attribute_type=='integer']"
-                      ]
-                    },
-                    "description": "Reference to an existing attribute to update.",
-                    "reference_to": "attribute",
-                    "title": "Reference",
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "operation",
-                  "reference"
-                ],
-                "type": "object"
-              }
-            ],
-            "target": "attribute",
-            "title": "Number of Duplicates"
-          },
-          "num_equidistant_attribute": {
-            "description": "Attribute to create or update with the number of equidistant samples (samples at the same distance from the query point) used in the estimate.",
-            "oneOf": [
-              {
-                "additionalProperties": false,
-                "properties": {
-                  "name": {
-                    "description": "The name of the attribute to create.",
-                    "title": "Name",
-                    "type": "string"
-                  },
-                  "operation": {
-                    "const": "create",
-                    "description": "The operation to perform on the attribute.",
-                    "title": "Operation"
-                  }
-                },
-                "required": [
-                  "operation",
-                  "name"
-                ],
-                "type": "object"
-              },
-              {
-                "additionalProperties": false,
-                "properties": {
-                  "operation": {
-                    "const": "update",
-                    "description": "The operation to perform on the attribute.",
-                    "title": "Operation"
-                  },
-                  "reference": {
-                    "attribute_from": "2/object",
-                    "attribute_path": {
-                      "block-model/[>=1.0,<2]": [
-                        "attributes[?attribute_type=='Int8'||attribute_type=='Int16'||attribute_type=='Int32'||attribute_type=='Int64'||attribute_type=='UInt8'||attribute_type=='UInt16'||attribute_type=='UInt32'||attribute_type=='UInt64']"
-                      ],
-                      "downhole-intervals/[>=1.2,<2]": [
-                        "attributes[?attribute_type=='integer']"
-                      ],
-                      "pointset/[>=1.2,<2]": [
-                        "locations.attributes[?attribute_type=='integer']"
-                      ],
-                      "regular-3d-grid/[>=1.2,<2]": [
-                        "cell_attributes[?attribute_type=='integer']"
-                      ],
-                      "regular-masked-3d-grid/[>=1.2,<2]": [
-                        "cell_attributes[?attribute_type=='integer']"
-                      ],
-                      "tensor-3d-grid/[>=1.2,<2]": [
-                        "cell_attributes[?attribute_type=='integer']"
-                      ]
-                    },
-                    "description": "Reference to an existing attribute to update.",
-                    "reference_to": "attribute",
-                    "title": "Reference",
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "operation",
-                  "reference"
-                ],
-                "type": "object"
-              }
-            ],
-            "target": "attribute",
-            "title": "Number of Equidistant Samples"
-          },
           "object": {
             "description": "Object to evaluate onto.",
             "format": "uri",
@@ -1877,488 +2485,15 @@
             "title": "Evaluation Target",
             "type": "string"
           },
-          "sample_count_attribute": {
-            "description": "Attribute to create or update with the number of data samples used in the estimate.",
-            "oneOf": [
-              {
-                "additionalProperties": false,
-                "properties": {
-                  "name": {
-                    "description": "The name of the attribute to create.",
-                    "title": "Name",
-                    "type": "string"
-                  },
-                  "operation": {
-                    "const": "create",
-                    "description": "The operation to perform on the attribute.",
-                    "title": "Operation"
-                  }
-                },
-                "required": [
-                  "operation",
-                  "name"
-                ],
-                "type": "object"
-              },
-              {
-                "additionalProperties": false,
-                "properties": {
-                  "operation": {
-                    "const": "update",
-                    "description": "The operation to perform on the attribute.",
-                    "title": "Operation"
-                  },
-                  "reference": {
-                    "attribute_from": "2/object",
-                    "attribute_path": {
-                      "block-model/[>=1.0,<2]": [
-                        "attributes[?attribute_type=='Int8'||attribute_type=='Int16'||attribute_type=='Int32'||attribute_type=='Int64'||attribute_type=='UInt8'||attribute_type=='UInt16'||attribute_type=='UInt32'||attribute_type=='UInt64']"
-                      ],
-                      "downhole-intervals/[>=1.2,<2]": [
-                        "attributes[?attribute_type=='integer']"
-                      ],
-                      "pointset/[>=1.2,<2]": [
-                        "locations.attributes[?attribute_type=='integer']"
-                      ],
-                      "regular-3d-grid/[>=1.2,<2]": [
-                        "cell_attributes[?attribute_type=='integer']"
-                      ],
-                      "regular-masked-3d-grid/[>=1.2,<2]": [
-                        "cell_attributes[?attribute_type=='integer']"
-                      ],
-                      "tensor-3d-grid/[>=1.2,<2]": [
-                        "cell_attributes[?attribute_type=='integer']"
-                      ]
-                    },
-                    "description": "Reference to an existing attribute to update.",
-                    "reference_to": "attribute",
-                    "title": "Reference",
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "operation",
-                  "reference"
-                ],
-                "type": "object"
-              }
+          "update_mode": {
+            "default": "auto",
+            "description": "How to treat target locations that this run did not estimate, such as locations excluded by the target filter or where the neighbourhood search found no samples. 'merge' keeps the values those locations already had, so running one domain at a time accumulates results into a single attribute. 'replace' clears them, so the attribute only ever holds the results of the latest run. 'auto' (the default) merges when a target filter is set and replaces otherwise. Merging only applies to attributes that already exist on the target object; a newly created attribute has nothing to merge with. Boolean and integer diagnostic attributes have no way to represent 'not estimated', so within the filter they are always written as produced.",
+            "enum": [
+              "auto",
+              "merge",
+              "replace"
             ],
-            "target": "attribute",
-            "title": "Sample Count"
-          },
-          "slope_attribute": {
-            "description": "Attribute to create or update with the slope of regression (a diagnostic for conditional bias).",
-            "oneOf": [
-              {
-                "additionalProperties": false,
-                "properties": {
-                  "name": {
-                    "description": "The name of the attribute to create.",
-                    "title": "Name",
-                    "type": "string"
-                  },
-                  "operation": {
-                    "const": "create",
-                    "description": "The operation to perform on the attribute.",
-                    "title": "Operation"
-                  }
-                },
-                "required": [
-                  "operation",
-                  "name"
-                ],
-                "type": "object"
-              },
-              {
-                "additionalProperties": false,
-                "properties": {
-                  "operation": {
-                    "const": "update",
-                    "description": "The operation to perform on the attribute.",
-                    "title": "Operation"
-                  },
-                  "reference": {
-                    "attribute_from": "2/object",
-                    "attribute_path": {
-                      "block-model/[>=1.0,<2]": [
-                        "attributes[?attribute_type=='Float64']"
-                      ],
-                      "downhole-intervals/[>=1.2,<2]": [
-                        "attributes[?attribute_type=='scalar']"
-                      ],
-                      "pointset/[>=1.2,<2]": [
-                        "locations.attributes[?attribute_type=='scalar']"
-                      ],
-                      "regular-3d-grid/[>=1.2,<2]": [
-                        "cell_attributes[?attribute_type=='scalar']"
-                      ],
-                      "regular-masked-3d-grid/[>=1.2,<2]": [
-                        "cell_attributes[?attribute_type=='scalar']"
-                      ],
-                      "tensor-3d-grid/[>=1.2,<2]": [
-                        "cell_attributes[?attribute_type=='scalar']"
-                      ]
-                    },
-                    "description": "Reference to an existing attribute to update.",
-                    "reference_to": "attribute",
-                    "title": "Reference",
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "operation",
-                  "reference"
-                ],
-                "type": "object"
-              }
-            ],
-            "target": "attribute",
-            "title": "Slope of Regression"
-          },
-          "sum_negative_weights_attribute": {
-            "description": "Attribute to create or update with the sum of negative kriging weights applied to data samples (zero when negative-weight removal is enabled).",
-            "oneOf": [
-              {
-                "additionalProperties": false,
-                "properties": {
-                  "name": {
-                    "description": "The name of the attribute to create.",
-                    "title": "Name",
-                    "type": "string"
-                  },
-                  "operation": {
-                    "const": "create",
-                    "description": "The operation to perform on the attribute.",
-                    "title": "Operation"
-                  }
-                },
-                "required": [
-                  "operation",
-                  "name"
-                ],
-                "type": "object"
-              },
-              {
-                "additionalProperties": false,
-                "properties": {
-                  "operation": {
-                    "const": "update",
-                    "description": "The operation to perform on the attribute.",
-                    "title": "Operation"
-                  },
-                  "reference": {
-                    "attribute_from": "2/object",
-                    "attribute_path": {
-                      "block-model/[>=1.0,<2]": [
-                        "attributes[?attribute_type=='Float64']"
-                      ],
-                      "downhole-intervals/[>=1.2,<2]": [
-                        "attributes[?attribute_type=='scalar']"
-                      ],
-                      "pointset/[>=1.2,<2]": [
-                        "locations.attributes[?attribute_type=='scalar']"
-                      ],
-                      "regular-3d-grid/[>=1.2,<2]": [
-                        "cell_attributes[?attribute_type=='scalar']"
-                      ],
-                      "regular-masked-3d-grid/[>=1.2,<2]": [
-                        "cell_attributes[?attribute_type=='scalar']"
-                      ],
-                      "tensor-3d-grid/[>=1.2,<2]": [
-                        "cell_attributes[?attribute_type=='scalar']"
-                      ]
-                    },
-                    "description": "Reference to an existing attribute to update.",
-                    "reference_to": "attribute",
-                    "title": "Reference",
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "operation",
-                  "reference"
-                ],
-                "type": "object"
-              }
-            ],
-            "target": "attribute",
-            "title": "Sum of Negative Weights"
-          },
-          "sum_positive_weights_attribute": {
-            "description": "Attribute to create or update with the sum of positive kriging weights applied to data samples.",
-            "oneOf": [
-              {
-                "additionalProperties": false,
-                "properties": {
-                  "name": {
-                    "description": "The name of the attribute to create.",
-                    "title": "Name",
-                    "type": "string"
-                  },
-                  "operation": {
-                    "const": "create",
-                    "description": "The operation to perform on the attribute.",
-                    "title": "Operation"
-                  }
-                },
-                "required": [
-                  "operation",
-                  "name"
-                ],
-                "type": "object"
-              },
-              {
-                "additionalProperties": false,
-                "properties": {
-                  "operation": {
-                    "const": "update",
-                    "description": "The operation to perform on the attribute.",
-                    "title": "Operation"
-                  },
-                  "reference": {
-                    "attribute_from": "2/object",
-                    "attribute_path": {
-                      "block-model/[>=1.0,<2]": [
-                        "attributes[?attribute_type=='Float64']"
-                      ],
-                      "downhole-intervals/[>=1.2,<2]": [
-                        "attributes[?attribute_type=='scalar']"
-                      ],
-                      "pointset/[>=1.2,<2]": [
-                        "locations.attributes[?attribute_type=='scalar']"
-                      ],
-                      "regular-3d-grid/[>=1.2,<2]": [
-                        "cell_attributes[?attribute_type=='scalar']"
-                      ],
-                      "regular-masked-3d-grid/[>=1.2,<2]": [
-                        "cell_attributes[?attribute_type=='scalar']"
-                      ],
-                      "tensor-3d-grid/[>=1.2,<2]": [
-                        "cell_attributes[?attribute_type=='scalar']"
-                      ]
-                    },
-                    "description": "Reference to an existing attribute to update.",
-                    "reference_to": "attribute",
-                    "title": "Reference",
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "operation",
-                  "reference"
-                ],
-                "type": "object"
-              }
-            ],
-            "target": "attribute",
-            "title": "Sum of Positive Weights"
-          },
-          "sum_weights_attribute": {
-            "description": "Attribute to create or update with the sum of kriging weights applied to data samples.",
-            "oneOf": [
-              {
-                "additionalProperties": false,
-                "properties": {
-                  "name": {
-                    "description": "The name of the attribute to create.",
-                    "title": "Name",
-                    "type": "string"
-                  },
-                  "operation": {
-                    "const": "create",
-                    "description": "The operation to perform on the attribute.",
-                    "title": "Operation"
-                  }
-                },
-                "required": [
-                  "operation",
-                  "name"
-                ],
-                "type": "object"
-              },
-              {
-                "additionalProperties": false,
-                "properties": {
-                  "operation": {
-                    "const": "update",
-                    "description": "The operation to perform on the attribute.",
-                    "title": "Operation"
-                  },
-                  "reference": {
-                    "attribute_from": "2/object",
-                    "attribute_path": {
-                      "block-model/[>=1.0,<2]": [
-                        "attributes[?attribute_type=='Float64']"
-                      ],
-                      "downhole-intervals/[>=1.2,<2]": [
-                        "attributes[?attribute_type=='scalar']"
-                      ],
-                      "pointset/[>=1.2,<2]": [
-                        "locations.attributes[?attribute_type=='scalar']"
-                      ],
-                      "regular-3d-grid/[>=1.2,<2]": [
-                        "cell_attributes[?attribute_type=='scalar']"
-                      ],
-                      "regular-masked-3d-grid/[>=1.2,<2]": [
-                        "cell_attributes[?attribute_type=='scalar']"
-                      ],
-                      "tensor-3d-grid/[>=1.2,<2]": [
-                        "cell_attributes[?attribute_type=='scalar']"
-                      ]
-                    },
-                    "description": "Reference to an existing attribute to update.",
-                    "reference_to": "attribute",
-                    "title": "Reference",
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "operation",
-                  "reference"
-                ],
-                "type": "object"
-              }
-            ],
-            "target": "attribute",
-            "title": "Sum of Weights"
-          },
-          "valid_attribute": {
-            "description": "Attribute to create or update with the validity flag: 1 where an estimate was produced and 0 where the neighbourhood search found no usable samples (the estimate is left blank there).",
-            "oneOf": [
-              {
-                "additionalProperties": false,
-                "properties": {
-                  "name": {
-                    "description": "The name of the attribute to create.",
-                    "title": "Name",
-                    "type": "string"
-                  },
-                  "operation": {
-                    "const": "create",
-                    "description": "The operation to perform on the attribute.",
-                    "title": "Operation"
-                  }
-                },
-                "required": [
-                  "operation",
-                  "name"
-                ],
-                "type": "object"
-              },
-              {
-                "additionalProperties": false,
-                "properties": {
-                  "operation": {
-                    "const": "update",
-                    "description": "The operation to perform on the attribute.",
-                    "title": "Operation"
-                  },
-                  "reference": {
-                    "attribute_from": "2/object",
-                    "attribute_path": {
-                      "block-model/[>=1.0,<2]": [
-                        "attributes[?attribute_type=='Boolean']"
-                      ],
-                      "downhole-intervals/[>=1.2,<2]": [
-                        "attributes[?attribute_type=='bool']"
-                      ],
-                      "pointset/[>=1.2,<2]": [
-                        "locations.attributes[?attribute_type=='bool']"
-                      ],
-                      "regular-3d-grid/[>=1.2,<2]": [
-                        "cell_attributes[?attribute_type=='bool']"
-                      ],
-                      "regular-masked-3d-grid/[>=1.2,<2]": [
-                        "cell_attributes[?attribute_type=='bool']"
-                      ],
-                      "tensor-3d-grid/[>=1.2,<2]": [
-                        "cell_attributes[?attribute_type=='bool']"
-                      ]
-                    },
-                    "description": "Reference to an existing attribute to update.",
-                    "reference_to": "attribute",
-                    "title": "Reference",
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "operation",
-                  "reference"
-                ],
-                "type": "object"
-              }
-            ],
-            "target": "attribute",
-            "title": "Valid"
-          },
-          "variance_attribute": {
-            "description": "Attribute to create or update with the kriging variance (estimation uncertainty).",
-            "oneOf": [
-              {
-                "additionalProperties": false,
-                "properties": {
-                  "name": {
-                    "description": "The name of the attribute to create.",
-                    "title": "Name",
-                    "type": "string"
-                  },
-                  "operation": {
-                    "const": "create",
-                    "description": "The operation to perform on the attribute.",
-                    "title": "Operation"
-                  }
-                },
-                "required": [
-                  "operation",
-                  "name"
-                ],
-                "type": "object"
-              },
-              {
-                "additionalProperties": false,
-                "properties": {
-                  "operation": {
-                    "const": "update",
-                    "description": "The operation to perform on the attribute.",
-                    "title": "Operation"
-                  },
-                  "reference": {
-                    "attribute_from": "2/object",
-                    "attribute_path": {
-                      "block-model/[>=1.0,<2]": [
-                        "attributes[?attribute_type=='Float64']"
-                      ],
-                      "downhole-intervals/[>=1.2,<2]": [
-                        "attributes[?attribute_type=='scalar']"
-                      ],
-                      "pointset/[>=1.2,<2]": [
-                        "locations.attributes[?attribute_type=='scalar']"
-                      ],
-                      "regular-3d-grid/[>=1.2,<2]": [
-                        "cell_attributes[?attribute_type=='scalar']"
-                      ],
-                      "regular-masked-3d-grid/[>=1.2,<2]": [
-                        "cell_attributes[?attribute_type=='scalar']"
-                      ],
-                      "tensor-3d-grid/[>=1.2,<2]": [
-                        "cell_attributes[?attribute_type=='scalar']"
-                      ]
-                    },
-                    "description": "Reference to an existing attribute to update.",
-                    "reference_to": "attribute",
-                    "title": "Reference",
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "operation",
-                  "reference"
-                ],
-                "type": "object"
-              }
-            ],
-            "target": "attribute",
-            "title": "Variance"
+            "title": "Update Mode"
           }
         },
         "required": [
@@ -2403,102 +2538,6 @@
         "description": "The target that was created or updated.",
         "output": "geoscience-object",
         "properties": {
-          "aniso_mean_distance": {
-            "additionalProperties": false,
-            "description": "Attribute containing the mean anisotropic (ellipsoid-space) distance from query point to all neighbors.",
-            "output": "attribute",
-            "properties": {
-              "name": {
-                "description": "The name of the output attribute.",
-                "title": "Name",
-                "type": "string"
-              },
-              "reference": {
-                "attribute_from": "2/reference",
-                "attribute_path": {
-                  "block-model/[>=1.0,<2]": [
-                    "attributes[?attribute_type=='Float64']"
-                  ],
-                  "downhole-intervals/[>=1.2,<2]": [
-                    "attributes[?attribute_type=='scalar']"
-                  ],
-                  "pointset/[>=1.2,<2]": [
-                    "locations.attributes[?attribute_type=='scalar']"
-                  ],
-                  "regular-3d-grid/[>=1.2,<2]": [
-                    "cell_attributes[?attribute_type=='scalar']"
-                  ],
-                  "regular-masked-3d-grid/[>=1.2,<2]": [
-                    "cell_attributes[?attribute_type=='scalar']"
-                  ],
-                  "tensor-3d-grid/[>=1.2,<2]": [
-                    "cell_attributes[?attribute_type=='scalar']"
-                  ]
-                },
-                "description": "Reference to the attribute in the geoscience object.",
-                "reference_to": "attribute",
-                "title": "Reference",
-                "type": "string"
-              }
-            },
-            "required": [
-              "reference",
-              "name"
-            ],
-            "title": "Anisotropic Mean Distance",
-            "type": [
-              "object",
-              "null"
-            ]
-          },
-          "aniso_min_distance": {
-            "additionalProperties": false,
-            "description": "Attribute containing the minimum anisotropic (ellipsoid-space) distance from query point to any neighbor.",
-            "output": "attribute",
-            "properties": {
-              "name": {
-                "description": "The name of the output attribute.",
-                "title": "Name",
-                "type": "string"
-              },
-              "reference": {
-                "attribute_from": "2/reference",
-                "attribute_path": {
-                  "block-model/[>=1.0,<2]": [
-                    "attributes[?attribute_type=='Float64']"
-                  ],
-                  "downhole-intervals/[>=1.2,<2]": [
-                    "attributes[?attribute_type=='scalar']"
-                  ],
-                  "pointset/[>=1.2,<2]": [
-                    "locations.attributes[?attribute_type=='scalar']"
-                  ],
-                  "regular-3d-grid/[>=1.2,<2]": [
-                    "cell_attributes[?attribute_type=='scalar']"
-                  ],
-                  "regular-masked-3d-grid/[>=1.2,<2]": [
-                    "cell_attributes[?attribute_type=='scalar']"
-                  ],
-                  "tensor-3d-grid/[>=1.2,<2]": [
-                    "cell_attributes[?attribute_type=='scalar']"
-                  ]
-                },
-                "description": "Reference to the attribute in the geoscience object.",
-                "reference_to": "attribute",
-                "title": "Reference",
-                "type": "string"
-              }
-            },
-            "required": [
-              "reference",
-              "name"
-            ],
-            "title": "Anisotropic Minimum Distance",
-            "type": [
-              "object",
-              "null"
-            ]
-          },
           "attribute": {
             "additionalProperties": false,
             "description": "Attribute containing the kriging result.",
@@ -2510,7 +2549,7 @@
                 "type": "string"
               },
               "reference": {
-                "attribute_from": "2/reference",
+                "attribute_from": "3/reference",
                 "attribute_path": {
                   "block-model/[>=1.0,<2]": [
                     "attributes[?attribute_type=='Float64']"
@@ -2521,10 +2560,16 @@
                   "pointset/[>=1.2,<2]": [
                     "locations.attributes[?attribute_type=='scalar']"
                   ],
+                  "regular-2d-grid/[>=1.2,<2]": [
+                    "cell_attributes[?attribute_type=='scalar']"
+                  ],
                   "regular-3d-grid/[>=1.2,<2]": [
                     "cell_attributes[?attribute_type=='scalar']"
                   ],
                   "regular-masked-3d-grid/[>=1.2,<2]": [
+                    "cell_attributes[?attribute_type=='scalar']"
+                  ],
+                  "tensor-2d-grid/[>=1.2,<2]": [
                     "cell_attributes[?attribute_type=='scalar']"
                   ],
                   "tensor-3d-grid/[>=1.2,<2]": [
@@ -2552,193 +2597,799 @@
               "null"
             ]
           },
-          "efficiency": {
+          "diagnostics": {
             "additionalProperties": false,
-            "description": "Attribute containing the proportion of point/intra-block variance explained by kriging weights.",
-            "output": "attribute",
+            "default": null,
+            "description": "Diagnostic attributes produced alongside the kriging result, when requested.",
             "properties": {
-              "name": {
-                "description": "The name of the output attribute.",
-                "title": "Name",
-                "type": "string"
-              },
-              "reference": {
-                "attribute_from": "2/reference",
-                "attribute_path": {
-                  "block-model/[>=1.0,<2]": [
-                    "attributes[?attribute_type=='Float64']"
-                  ],
-                  "downhole-intervals/[>=1.2,<2]": [
-                    "attributes[?attribute_type=='scalar']"
-                  ],
-                  "pointset/[>=1.2,<2]": [
-                    "locations.attributes[?attribute_type=='scalar']"
-                  ],
-                  "regular-3d-grid/[>=1.2,<2]": [
-                    "cell_attributes[?attribute_type=='scalar']"
-                  ],
-                  "regular-masked-3d-grid/[>=1.2,<2]": [
-                    "cell_attributes[?attribute_type=='scalar']"
-                  ],
-                  "tensor-3d-grid/[>=1.2,<2]": [
-                    "cell_attributes[?attribute_type=='scalar']"
-                  ]
+              "aniso_mean_distance": {
+                "additionalProperties": false,
+                "description": "Attribute containing the mean anisotropic (ellipsoid-space) distance from the target location to all neighbours.",
+                "output": "attribute",
+                "properties": {
+                  "name": {
+                    "description": "The name of the output attribute.",
+                    "title": "Name",
+                    "type": "string"
+                  },
+                  "reference": {
+                    "attribute_from": "3/reference",
+                    "attribute_path": {
+                      "block-model/[>=1.0,<2]": [
+                        "attributes[?attribute_type=='Float64']"
+                      ],
+                      "downhole-intervals/[>=1.2,<2]": [
+                        "attributes[?attribute_type=='scalar']"
+                      ],
+                      "pointset/[>=1.2,<2]": [
+                        "locations.attributes[?attribute_type=='scalar']"
+                      ],
+                      "regular-3d-grid/[>=1.2,<2]": [
+                        "cell_attributes[?attribute_type=='scalar']"
+                      ],
+                      "regular-masked-3d-grid/[>=1.2,<2]": [
+                        "cell_attributes[?attribute_type=='scalar']"
+                      ],
+                      "tensor-3d-grid/[>=1.2,<2]": [
+                        "cell_attributes[?attribute_type=='scalar']"
+                      ]
+                    },
+                    "description": "Reference to the attribute in the geoscience object.",
+                    "reference_to": "attribute",
+                    "title": "Reference",
+                    "type": "string"
+                  }
                 },
-                "description": "Reference to the attribute in the geoscience object.",
-                "reference_to": "attribute",
-                "title": "Reference",
-                "type": "string"
+                "required": [
+                  "reference",
+                  "name"
+                ],
+                "title": "Anisotropic Mean Distance",
+                "type": [
+                  "object",
+                  "null"
+                ]
+              },
+              "aniso_min_distance": {
+                "additionalProperties": false,
+                "description": "Attribute containing the minimum anisotropic (ellipsoid-space) distance from the target location to any neighbour.",
+                "output": "attribute",
+                "properties": {
+                  "name": {
+                    "description": "The name of the output attribute.",
+                    "title": "Name",
+                    "type": "string"
+                  },
+                  "reference": {
+                    "attribute_from": "3/reference",
+                    "attribute_path": {
+                      "block-model/[>=1.0,<2]": [
+                        "attributes[?attribute_type=='Float64']"
+                      ],
+                      "downhole-intervals/[>=1.2,<2]": [
+                        "attributes[?attribute_type=='scalar']"
+                      ],
+                      "pointset/[>=1.2,<2]": [
+                        "locations.attributes[?attribute_type=='scalar']"
+                      ],
+                      "regular-3d-grid/[>=1.2,<2]": [
+                        "cell_attributes[?attribute_type=='scalar']"
+                      ],
+                      "regular-masked-3d-grid/[>=1.2,<2]": [
+                        "cell_attributes[?attribute_type=='scalar']"
+                      ],
+                      "tensor-3d-grid/[>=1.2,<2]": [
+                        "cell_attributes[?attribute_type=='scalar']"
+                      ]
+                    },
+                    "description": "Reference to the attribute in the geoscience object.",
+                    "reference_to": "attribute",
+                    "title": "Reference",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "reference",
+                  "name"
+                ],
+                "title": "Anisotropic Minimum Distance",
+                "type": [
+                  "object",
+                  "null"
+                ]
+              },
+              "kriging_efficiency": {
+                "additionalProperties": false,
+                "description": "Attribute containing the proportion of point or intra-block variance explained by kriging weights.",
+                "output": "attribute",
+                "properties": {
+                  "name": {
+                    "description": "The name of the output attribute.",
+                    "title": "Name",
+                    "type": "string"
+                  },
+                  "reference": {
+                    "attribute_from": "3/reference",
+                    "attribute_path": {
+                      "block-model/[>=1.0,<2]": [
+                        "attributes[?attribute_type=='Float64']"
+                      ],
+                      "downhole-intervals/[>=1.2,<2]": [
+                        "attributes[?attribute_type=='scalar']"
+                      ],
+                      "pointset/[>=1.2,<2]": [
+                        "locations.attributes[?attribute_type=='scalar']"
+                      ],
+                      "regular-3d-grid/[>=1.2,<2]": [
+                        "cell_attributes[?attribute_type=='scalar']"
+                      ],
+                      "regular-masked-3d-grid/[>=1.2,<2]": [
+                        "cell_attributes[?attribute_type=='scalar']"
+                      ],
+                      "tensor-3d-grid/[>=1.2,<2]": [
+                        "cell_attributes[?attribute_type=='scalar']"
+                      ]
+                    },
+                    "description": "Reference to the attribute in the geoscience object.",
+                    "reference_to": "attribute",
+                    "title": "Reference",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "reference",
+                  "name"
+                ],
+                "title": "Kriging Efficiency",
+                "type": [
+                  "object",
+                  "null"
+                ]
+              },
+              "kriging_mean": {
+                "additionalProperties": false,
+                "description": "Attribute containing the GLS mean for ordinary kriging, or the supplied constant mean for simple kriging.",
+                "output": "attribute",
+                "properties": {
+                  "name": {
+                    "description": "The name of the output attribute.",
+                    "title": "Name",
+                    "type": "string"
+                  },
+                  "reference": {
+                    "attribute_from": "3/reference",
+                    "attribute_path": {
+                      "block-model/[>=1.0,<2]": [
+                        "attributes[?attribute_type=='Float64']"
+                      ],
+                      "downhole-intervals/[>=1.2,<2]": [
+                        "attributes[?attribute_type=='scalar']"
+                      ],
+                      "pointset/[>=1.2,<2]": [
+                        "locations.attributes[?attribute_type=='scalar']"
+                      ],
+                      "regular-3d-grid/[>=1.2,<2]": [
+                        "cell_attributes[?attribute_type=='scalar']"
+                      ],
+                      "regular-masked-3d-grid/[>=1.2,<2]": [
+                        "cell_attributes[?attribute_type=='scalar']"
+                      ],
+                      "tensor-3d-grid/[>=1.2,<2]": [
+                        "cell_attributes[?attribute_type=='scalar']"
+                      ]
+                    },
+                    "description": "Reference to the attribute in the geoscience object.",
+                    "reference_to": "attribute",
+                    "title": "Reference",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "reference",
+                  "name"
+                ],
+                "title": "Kriging Mean",
+                "type": [
+                  "object",
+                  "null"
+                ]
+              },
+              "kriging_variance": {
+                "additionalProperties": false,
+                "description": "Attribute containing the kriging variance (estimation uncertainty).",
+                "output": "attribute",
+                "properties": {
+                  "name": {
+                    "description": "The name of the output attribute.",
+                    "title": "Name",
+                    "type": "string"
+                  },
+                  "reference": {
+                    "attribute_from": "3/reference",
+                    "attribute_path": {
+                      "block-model/[>=1.0,<2]": [
+                        "attributes[?attribute_type=='Float64']"
+                      ],
+                      "downhole-intervals/[>=1.2,<2]": [
+                        "attributes[?attribute_type=='scalar']"
+                      ],
+                      "pointset/[>=1.2,<2]": [
+                        "locations.attributes[?attribute_type=='scalar']"
+                      ],
+                      "regular-3d-grid/[>=1.2,<2]": [
+                        "cell_attributes[?attribute_type=='scalar']"
+                      ],
+                      "regular-masked-3d-grid/[>=1.2,<2]": [
+                        "cell_attributes[?attribute_type=='scalar']"
+                      ],
+                      "tensor-3d-grid/[>=1.2,<2]": [
+                        "cell_attributes[?attribute_type=='scalar']"
+                      ]
+                    },
+                    "description": "Reference to the attribute in the geoscience object.",
+                    "reference_to": "attribute",
+                    "title": "Reference",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "reference",
+                  "name"
+                ],
+                "title": "Kriging Variance",
+                "type": [
+                  "object",
+                  "null"
+                ]
+              },
+              "mean_distance": {
+                "additionalProperties": false,
+                "description": "Attribute containing the mean isotropic Euclidean distance from the target location to all neighbours.",
+                "output": "attribute",
+                "properties": {
+                  "name": {
+                    "description": "The name of the output attribute.",
+                    "title": "Name",
+                    "type": "string"
+                  },
+                  "reference": {
+                    "attribute_from": "3/reference",
+                    "attribute_path": {
+                      "block-model/[>=1.0,<2]": [
+                        "attributes[?attribute_type=='Float64']"
+                      ],
+                      "downhole-intervals/[>=1.2,<2]": [
+                        "attributes[?attribute_type=='scalar']"
+                      ],
+                      "pointset/[>=1.2,<2]": [
+                        "locations.attributes[?attribute_type=='scalar']"
+                      ],
+                      "regular-3d-grid/[>=1.2,<2]": [
+                        "cell_attributes[?attribute_type=='scalar']"
+                      ],
+                      "regular-masked-3d-grid/[>=1.2,<2]": [
+                        "cell_attributes[?attribute_type=='scalar']"
+                      ],
+                      "tensor-3d-grid/[>=1.2,<2]": [
+                        "cell_attributes[?attribute_type=='scalar']"
+                      ]
+                    },
+                    "description": "Reference to the attribute in the geoscience object.",
+                    "reference_to": "attribute",
+                    "title": "Reference",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "reference",
+                  "name"
+                ],
+                "title": "Mean Distance",
+                "type": [
+                  "object",
+                  "null"
+                ]
+              },
+              "min_distance": {
+                "additionalProperties": false,
+                "description": "Attribute containing the minimum isotropic Euclidean distance from the target location to any neighbour.",
+                "output": "attribute",
+                "properties": {
+                  "name": {
+                    "description": "The name of the output attribute.",
+                    "title": "Name",
+                    "type": "string"
+                  },
+                  "reference": {
+                    "attribute_from": "3/reference",
+                    "attribute_path": {
+                      "block-model/[>=1.0,<2]": [
+                        "attributes[?attribute_type=='Float64']"
+                      ],
+                      "downhole-intervals/[>=1.2,<2]": [
+                        "attributes[?attribute_type=='scalar']"
+                      ],
+                      "pointset/[>=1.2,<2]": [
+                        "locations.attributes[?attribute_type=='scalar']"
+                      ],
+                      "regular-3d-grid/[>=1.2,<2]": [
+                        "cell_attributes[?attribute_type=='scalar']"
+                      ],
+                      "regular-masked-3d-grid/[>=1.2,<2]": [
+                        "cell_attributes[?attribute_type=='scalar']"
+                      ],
+                      "tensor-3d-grid/[>=1.2,<2]": [
+                        "cell_attributes[?attribute_type=='scalar']"
+                      ]
+                    },
+                    "description": "Reference to the attribute in the geoscience object.",
+                    "reference_to": "attribute",
+                    "title": "Reference",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "reference",
+                  "name"
+                ],
+                "title": "Minimum Distance",
+                "type": [
+                  "object",
+                  "null"
+                ]
+              },
+              "num_drillholes": {
+                "additionalProperties": false,
+                "description": "Attribute containing the number of distinct drillholes contributing to the estimate.",
+                "output": "attribute",
+                "properties": {
+                  "name": {
+                    "description": "The name of the output attribute.",
+                    "title": "Name",
+                    "type": "string"
+                  },
+                  "reference": {
+                    "attribute_from": "3/reference",
+                    "attribute_path": {
+                      "block-model/[>=1.0,<2]": [
+                        "attributes[?attribute_type=='Int8'||attribute_type=='Int16'||attribute_type=='Int32'||attribute_type=='Int64'||attribute_type=='UInt8'||attribute_type=='UInt16'||attribute_type=='UInt32'||attribute_type=='UInt64']"
+                      ],
+                      "downhole-intervals/[>=1.2,<2]": [
+                        "attributes[?attribute_type=='integer']"
+                      ],
+                      "pointset/[>=1.2,<2]": [
+                        "locations.attributes[?attribute_type=='integer']"
+                      ],
+                      "regular-3d-grid/[>=1.2,<2]": [
+                        "cell_attributes[?attribute_type=='integer']"
+                      ],
+                      "regular-masked-3d-grid/[>=1.2,<2]": [
+                        "cell_attributes[?attribute_type=='integer']"
+                      ],
+                      "tensor-3d-grid/[>=1.2,<2]": [
+                        "cell_attributes[?attribute_type=='integer']"
+                      ]
+                    },
+                    "description": "Reference to the attribute in the geoscience object.",
+                    "reference_to": "attribute",
+                    "title": "Reference",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "reference",
+                  "name"
+                ],
+                "title": "Number of Drillholes",
+                "type": [
+                  "object",
+                  "null"
+                ]
+              },
+              "num_duplicates": {
+                "additionalProperties": false,
+                "description": "Attribute containing the number of duplicate sample locations used in the estimate.",
+                "output": "attribute",
+                "properties": {
+                  "name": {
+                    "description": "The name of the output attribute.",
+                    "title": "Name",
+                    "type": "string"
+                  },
+                  "reference": {
+                    "attribute_from": "3/reference",
+                    "attribute_path": {
+                      "block-model/[>=1.0,<2]": [
+                        "attributes[?attribute_type=='Int8'||attribute_type=='Int16'||attribute_type=='Int32'||attribute_type=='Int64'||attribute_type=='UInt8'||attribute_type=='UInt16'||attribute_type=='UInt32'||attribute_type=='UInt64']"
+                      ],
+                      "downhole-intervals/[>=1.2,<2]": [
+                        "attributes[?attribute_type=='integer']"
+                      ],
+                      "pointset/[>=1.2,<2]": [
+                        "locations.attributes[?attribute_type=='integer']"
+                      ],
+                      "regular-3d-grid/[>=1.2,<2]": [
+                        "cell_attributes[?attribute_type=='integer']"
+                      ],
+                      "regular-masked-3d-grid/[>=1.2,<2]": [
+                        "cell_attributes[?attribute_type=='integer']"
+                      ],
+                      "tensor-3d-grid/[>=1.2,<2]": [
+                        "cell_attributes[?attribute_type=='integer']"
+                      ]
+                    },
+                    "description": "Reference to the attribute in the geoscience object.",
+                    "reference_to": "attribute",
+                    "title": "Reference",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "reference",
+                  "name"
+                ],
+                "title": "Number of Duplicates",
+                "type": [
+                  "object",
+                  "null"
+                ]
+              },
+              "num_equidistant": {
+                "additionalProperties": false,
+                "description": "Attribute containing a hint of how many other samples could have replaced the last returned sample because they were the same distance from the target location. This is counted after searching and before clipping to the maximum number of samples.",
+                "output": "attribute",
+                "properties": {
+                  "name": {
+                    "description": "The name of the output attribute.",
+                    "title": "Name",
+                    "type": "string"
+                  },
+                  "reference": {
+                    "attribute_from": "3/reference",
+                    "attribute_path": {
+                      "block-model/[>=1.0,<2]": [
+                        "attributes[?attribute_type=='Int8'||attribute_type=='Int16'||attribute_type=='Int32'||attribute_type=='Int64'||attribute_type=='UInt8'||attribute_type=='UInt16'||attribute_type=='UInt32'||attribute_type=='UInt64']"
+                      ],
+                      "downhole-intervals/[>=1.2,<2]": [
+                        "attributes[?attribute_type=='integer']"
+                      ],
+                      "pointset/[>=1.2,<2]": [
+                        "locations.attributes[?attribute_type=='integer']"
+                      ],
+                      "regular-3d-grid/[>=1.2,<2]": [
+                        "cell_attributes[?attribute_type=='integer']"
+                      ],
+                      "regular-masked-3d-grid/[>=1.2,<2]": [
+                        "cell_attributes[?attribute_type=='integer']"
+                      ],
+                      "tensor-3d-grid/[>=1.2,<2]": [
+                        "cell_attributes[?attribute_type=='integer']"
+                      ]
+                    },
+                    "description": "Reference to the attribute in the geoscience object.",
+                    "reference_to": "attribute",
+                    "title": "Reference",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "reference",
+                  "name"
+                ],
+                "title": "Number of Equidistant Samples",
+                "type": [
+                  "object",
+                  "null"
+                ]
+              },
+              "num_samples": {
+                "additionalProperties": false,
+                "description": "Attribute containing the number of data samples used in the estimate.",
+                "output": "attribute",
+                "properties": {
+                  "name": {
+                    "description": "The name of the output attribute.",
+                    "title": "Name",
+                    "type": "string"
+                  },
+                  "reference": {
+                    "attribute_from": "3/reference",
+                    "attribute_path": {
+                      "block-model/[>=1.0,<2]": [
+                        "attributes[?attribute_type=='Int8'||attribute_type=='Int16'||attribute_type=='Int32'||attribute_type=='Int64'||attribute_type=='UInt8'||attribute_type=='UInt16'||attribute_type=='UInt32'||attribute_type=='UInt64']"
+                      ],
+                      "downhole-intervals/[>=1.2,<2]": [
+                        "attributes[?attribute_type=='integer']"
+                      ],
+                      "pointset/[>=1.2,<2]": [
+                        "locations.attributes[?attribute_type=='integer']"
+                      ],
+                      "regular-3d-grid/[>=1.2,<2]": [
+                        "cell_attributes[?attribute_type=='integer']"
+                      ],
+                      "regular-masked-3d-grid/[>=1.2,<2]": [
+                        "cell_attributes[?attribute_type=='integer']"
+                      ],
+                      "tensor-3d-grid/[>=1.2,<2]": [
+                        "cell_attributes[?attribute_type=='integer']"
+                      ]
+                    },
+                    "description": "Reference to the attribute in the geoscience object.",
+                    "reference_to": "attribute",
+                    "title": "Reference",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "reference",
+                  "name"
+                ],
+                "title": "Number of Samples",
+                "type": [
+                  "object",
+                  "null"
+                ]
+              },
+              "slope_of_regression": {
+                "additionalProperties": false,
+                "description": "Attribute containing the diagnostic for conditional bias.",
+                "output": "attribute",
+                "properties": {
+                  "name": {
+                    "description": "The name of the output attribute.",
+                    "title": "Name",
+                    "type": "string"
+                  },
+                  "reference": {
+                    "attribute_from": "3/reference",
+                    "attribute_path": {
+                      "block-model/[>=1.0,<2]": [
+                        "attributes[?attribute_type=='Float64']"
+                      ],
+                      "downhole-intervals/[>=1.2,<2]": [
+                        "attributes[?attribute_type=='scalar']"
+                      ],
+                      "pointset/[>=1.2,<2]": [
+                        "locations.attributes[?attribute_type=='scalar']"
+                      ],
+                      "regular-3d-grid/[>=1.2,<2]": [
+                        "cell_attributes[?attribute_type=='scalar']"
+                      ],
+                      "regular-masked-3d-grid/[>=1.2,<2]": [
+                        "cell_attributes[?attribute_type=='scalar']"
+                      ],
+                      "tensor-3d-grid/[>=1.2,<2]": [
+                        "cell_attributes[?attribute_type=='scalar']"
+                      ]
+                    },
+                    "description": "Reference to the attribute in the geoscience object.",
+                    "reference_to": "attribute",
+                    "title": "Reference",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "reference",
+                  "name"
+                ],
+                "title": "Slope of Regression",
+                "type": [
+                  "object",
+                  "null"
+                ]
+              },
+              "sum_negative_weights": {
+                "additionalProperties": false,
+                "description": "Attribute containing the sum of negative kriging weights applied to data samples (zero when negative-weight removal is enabled).",
+                "output": "attribute",
+                "properties": {
+                  "name": {
+                    "description": "The name of the output attribute.",
+                    "title": "Name",
+                    "type": "string"
+                  },
+                  "reference": {
+                    "attribute_from": "3/reference",
+                    "attribute_path": {
+                      "block-model/[>=1.0,<2]": [
+                        "attributes[?attribute_type=='Float64']"
+                      ],
+                      "downhole-intervals/[>=1.2,<2]": [
+                        "attributes[?attribute_type=='scalar']"
+                      ],
+                      "pointset/[>=1.2,<2]": [
+                        "locations.attributes[?attribute_type=='scalar']"
+                      ],
+                      "regular-3d-grid/[>=1.2,<2]": [
+                        "cell_attributes[?attribute_type=='scalar']"
+                      ],
+                      "regular-masked-3d-grid/[>=1.2,<2]": [
+                        "cell_attributes[?attribute_type=='scalar']"
+                      ],
+                      "tensor-3d-grid/[>=1.2,<2]": [
+                        "cell_attributes[?attribute_type=='scalar']"
+                      ]
+                    },
+                    "description": "Reference to the attribute in the geoscience object.",
+                    "reference_to": "attribute",
+                    "title": "Reference",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "reference",
+                  "name"
+                ],
+                "title": "Sum of Negative Weights",
+                "type": [
+                  "object",
+                  "null"
+                ]
+              },
+              "sum_positive_weights": {
+                "additionalProperties": false,
+                "description": "Attribute containing the sum of positive kriging weights applied to data samples.",
+                "output": "attribute",
+                "properties": {
+                  "name": {
+                    "description": "The name of the output attribute.",
+                    "title": "Name",
+                    "type": "string"
+                  },
+                  "reference": {
+                    "attribute_from": "3/reference",
+                    "attribute_path": {
+                      "block-model/[>=1.0,<2]": [
+                        "attributes[?attribute_type=='Float64']"
+                      ],
+                      "downhole-intervals/[>=1.2,<2]": [
+                        "attributes[?attribute_type=='scalar']"
+                      ],
+                      "pointset/[>=1.2,<2]": [
+                        "locations.attributes[?attribute_type=='scalar']"
+                      ],
+                      "regular-3d-grid/[>=1.2,<2]": [
+                        "cell_attributes[?attribute_type=='scalar']"
+                      ],
+                      "regular-masked-3d-grid/[>=1.2,<2]": [
+                        "cell_attributes[?attribute_type=='scalar']"
+                      ],
+                      "tensor-3d-grid/[>=1.2,<2]": [
+                        "cell_attributes[?attribute_type=='scalar']"
+                      ]
+                    },
+                    "description": "Reference to the attribute in the geoscience object.",
+                    "reference_to": "attribute",
+                    "title": "Reference",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "reference",
+                  "name"
+                ],
+                "title": "Sum of Positive Weights",
+                "type": [
+                  "object",
+                  "null"
+                ]
+              },
+              "sum_weights": {
+                "additionalProperties": false,
+                "description": "Attribute containing the sum of kriging weights applied to data samples.",
+                "output": "attribute",
+                "properties": {
+                  "name": {
+                    "description": "The name of the output attribute.",
+                    "title": "Name",
+                    "type": "string"
+                  },
+                  "reference": {
+                    "attribute_from": "3/reference",
+                    "attribute_path": {
+                      "block-model/[>=1.0,<2]": [
+                        "attributes[?attribute_type=='Float64']"
+                      ],
+                      "downhole-intervals/[>=1.2,<2]": [
+                        "attributes[?attribute_type=='scalar']"
+                      ],
+                      "pointset/[>=1.2,<2]": [
+                        "locations.attributes[?attribute_type=='scalar']"
+                      ],
+                      "regular-3d-grid/[>=1.2,<2]": [
+                        "cell_attributes[?attribute_type=='scalar']"
+                      ],
+                      "regular-masked-3d-grid/[>=1.2,<2]": [
+                        "cell_attributes[?attribute_type=='scalar']"
+                      ],
+                      "tensor-3d-grid/[>=1.2,<2]": [
+                        "cell_attributes[?attribute_type=='scalar']"
+                      ]
+                    },
+                    "description": "Reference to the attribute in the geoscience object.",
+                    "reference_to": "attribute",
+                    "title": "Reference",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "reference",
+                  "name"
+                ],
+                "title": "Sum of Weights",
+                "type": [
+                  "object",
+                  "null"
+                ]
+              },
+              "valid": {
+                "additionalProperties": false,
+                "description": "Attribute containing whether each target location's neighbourhood satisfied the search constraints and produced an estimate.",
+                "output": "attribute",
+                "properties": {
+                  "name": {
+                    "description": "The name of the output attribute.",
+                    "title": "Name",
+                    "type": "string"
+                  },
+                  "reference": {
+                    "attribute_from": "3/reference",
+                    "attribute_path": {
+                      "block-model/[>=1.0,<2]": [
+                        "attributes[?attribute_type=='Boolean']"
+                      ],
+                      "downhole-intervals/[>=1.2,<2]": [
+                        "attributes[?attribute_type=='bool']"
+                      ],
+                      "pointset/[>=1.2,<2]": [
+                        "locations.attributes[?attribute_type=='bool']"
+                      ],
+                      "regular-3d-grid/[>=1.2,<2]": [
+                        "cell_attributes[?attribute_type=='bool']"
+                      ],
+                      "regular-masked-3d-grid/[>=1.2,<2]": [
+                        "cell_attributes[?attribute_type=='bool']"
+                      ],
+                      "tensor-3d-grid/[>=1.2,<2]": [
+                        "cell_attributes[?attribute_type=='bool']"
+                      ]
+                    },
+                    "description": "Reference to the attribute in the geoscience object.",
+                    "reference_to": "attribute",
+                    "title": "Reference",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "reference",
+                  "name"
+                ],
+                "title": "Valid",
+                "type": [
+                  "object",
+                  "null"
+                ]
               }
             },
             "required": [
-              "reference",
-              "name"
+              "valid",
+              "kriging_variance",
+              "slope_of_regression",
+              "kriging_efficiency",
+              "kriging_mean",
+              "num_samples",
+              "num_drillholes",
+              "num_duplicates",
+              "num_equidistant",
+              "sum_weights",
+              "sum_positive_weights",
+              "sum_negative_weights",
+              "min_distance",
+              "mean_distance",
+              "aniso_min_distance",
+              "aniso_mean_distance"
             ],
-            "title": "Kriging Efficiency",
-            "type": [
-              "object",
-              "null"
-            ]
-          },
-          "mean": {
-            "additionalProperties": false,
-            "description": "Attribute containing the GLS mean for ordinary kriging, or the supplied constant mean for simple kriging.",
-            "output": "attribute",
-            "properties": {
-              "name": {
-                "description": "The name of the output attribute.",
-                "title": "Name",
-                "type": "string"
-              },
-              "reference": {
-                "attribute_from": "2/reference",
-                "attribute_path": {
-                  "block-model/[>=1.0,<2]": [
-                    "attributes[?attribute_type=='Float64']"
-                  ],
-                  "downhole-intervals/[>=1.2,<2]": [
-                    "attributes[?attribute_type=='scalar']"
-                  ],
-                  "pointset/[>=1.2,<2]": [
-                    "locations.attributes[?attribute_type=='scalar']"
-                  ],
-                  "regular-3d-grid/[>=1.2,<2]": [
-                    "cell_attributes[?attribute_type=='scalar']"
-                  ],
-                  "regular-masked-3d-grid/[>=1.2,<2]": [
-                    "cell_attributes[?attribute_type=='scalar']"
-                  ],
-                  "tensor-3d-grid/[>=1.2,<2]": [
-                    "cell_attributes[?attribute_type=='scalar']"
-                  ]
-                },
-                "description": "Reference to the attribute in the geoscience object.",
-                "reference_to": "attribute",
-                "title": "Reference",
-                "type": "string"
-              }
-            },
-            "required": [
-              "reference",
-              "name"
-            ],
-            "title": "Kriging Mean",
-            "type": [
-              "object",
-              "null"
-            ]
-          },
-          "mean_distance": {
-            "additionalProperties": false,
-            "description": "Attribute containing the mean isotropic Euclidean distance from query point to all neighbors.",
-            "output": "attribute",
-            "properties": {
-              "name": {
-                "description": "The name of the output attribute.",
-                "title": "Name",
-                "type": "string"
-              },
-              "reference": {
-                "attribute_from": "2/reference",
-                "attribute_path": {
-                  "block-model/[>=1.0,<2]": [
-                    "attributes[?attribute_type=='Float64']"
-                  ],
-                  "downhole-intervals/[>=1.2,<2]": [
-                    "attributes[?attribute_type=='scalar']"
-                  ],
-                  "pointset/[>=1.2,<2]": [
-                    "locations.attributes[?attribute_type=='scalar']"
-                  ],
-                  "regular-3d-grid/[>=1.2,<2]": [
-                    "cell_attributes[?attribute_type=='scalar']"
-                  ],
-                  "regular-masked-3d-grid/[>=1.2,<2]": [
-                    "cell_attributes[?attribute_type=='scalar']"
-                  ],
-                  "tensor-3d-grid/[>=1.2,<2]": [
-                    "cell_attributes[?attribute_type=='scalar']"
-                  ]
-                },
-                "description": "Reference to the attribute in the geoscience object.",
-                "reference_to": "attribute",
-                "title": "Reference",
-                "type": "string"
-              }
-            },
-            "required": [
-              "reference",
-              "name"
-            ],
-            "title": "Mean Distance",
-            "type": [
-              "object",
-              "null"
-            ]
-          },
-          "min_distance": {
-            "additionalProperties": false,
-            "description": "Attribute containing the minimum isotropic Euclidean distance from query point to any neighbor.",
-            "output": "attribute",
-            "properties": {
-              "name": {
-                "description": "The name of the output attribute.",
-                "title": "Name",
-                "type": "string"
-              },
-              "reference": {
-                "attribute_from": "2/reference",
-                "attribute_path": {
-                  "block-model/[>=1.0,<2]": [
-                    "attributes[?attribute_type=='Float64']"
-                  ],
-                  "downhole-intervals/[>=1.2,<2]": [
-                    "attributes[?attribute_type=='scalar']"
-                  ],
-                  "pointset/[>=1.2,<2]": [
-                    "locations.attributes[?attribute_type=='scalar']"
-                  ],
-                  "regular-3d-grid/[>=1.2,<2]": [
-                    "cell_attributes[?attribute_type=='scalar']"
-                  ],
-                  "regular-masked-3d-grid/[>=1.2,<2]": [
-                    "cell_attributes[?attribute_type=='scalar']"
-                  ],
-                  "tensor-3d-grid/[>=1.2,<2]": [
-                    "cell_attributes[?attribute_type=='scalar']"
-                  ]
-                },
-                "description": "Reference to the attribute in the geoscience object.",
-                "reference_to": "attribute",
-                "title": "Reference",
-                "type": "string"
-              }
-            },
-            "required": [
-              "reference",
-              "name"
-            ],
-            "title": "Minimum Distance",
+            "title": "Diagnostics",
             "type": [
               "object",
               "null"
@@ -2748,150 +3399,6 @@
             "description": "The name of the geoscience object.",
             "title": "Name",
             "type": "string"
-          },
-          "num_drillholes": {
-            "additionalProperties": false,
-            "description": "Attribute containing the number of distinct drillholes contributing to the estimate.",
-            "output": "attribute",
-            "properties": {
-              "name": {
-                "description": "The name of the output attribute.",
-                "title": "Name",
-                "type": "string"
-              },
-              "reference": {
-                "attribute_from": "2/reference",
-                "attribute_path": {
-                  "block-model/[>=1.0,<2]": [
-                    "attributes[?attribute_type=='Int8'||attribute_type=='Int16'||attribute_type=='Int32'||attribute_type=='Int64'||attribute_type=='UInt8'||attribute_type=='UInt16'||attribute_type=='UInt32'||attribute_type=='UInt64']"
-                  ],
-                  "downhole-intervals/[>=1.2,<2]": [
-                    "attributes[?attribute_type=='integer']"
-                  ],
-                  "pointset/[>=1.2,<2]": [
-                    "locations.attributes[?attribute_type=='integer']"
-                  ],
-                  "regular-3d-grid/[>=1.2,<2]": [
-                    "cell_attributes[?attribute_type=='integer']"
-                  ],
-                  "regular-masked-3d-grid/[>=1.2,<2]": [
-                    "cell_attributes[?attribute_type=='integer']"
-                  ],
-                  "tensor-3d-grid/[>=1.2,<2]": [
-                    "cell_attributes[?attribute_type=='integer']"
-                  ]
-                },
-                "description": "Reference to the attribute in the geoscience object.",
-                "reference_to": "attribute",
-                "title": "Reference",
-                "type": "string"
-              }
-            },
-            "required": [
-              "reference",
-              "name"
-            ],
-            "title": "Number of Drillholes",
-            "type": [
-              "object",
-              "null"
-            ]
-          },
-          "num_duplicates": {
-            "additionalProperties": false,
-            "description": "Attribute containing the number of duplicate sample locations used in the estimate.",
-            "output": "attribute",
-            "properties": {
-              "name": {
-                "description": "The name of the output attribute.",
-                "title": "Name",
-                "type": "string"
-              },
-              "reference": {
-                "attribute_from": "2/reference",
-                "attribute_path": {
-                  "block-model/[>=1.0,<2]": [
-                    "attributes[?attribute_type=='Int8'||attribute_type=='Int16'||attribute_type=='Int32'||attribute_type=='Int64'||attribute_type=='UInt8'||attribute_type=='UInt16'||attribute_type=='UInt32'||attribute_type=='UInt64']"
-                  ],
-                  "downhole-intervals/[>=1.2,<2]": [
-                    "attributes[?attribute_type=='integer']"
-                  ],
-                  "pointset/[>=1.2,<2]": [
-                    "locations.attributes[?attribute_type=='integer']"
-                  ],
-                  "regular-3d-grid/[>=1.2,<2]": [
-                    "cell_attributes[?attribute_type=='integer']"
-                  ],
-                  "regular-masked-3d-grid/[>=1.2,<2]": [
-                    "cell_attributes[?attribute_type=='integer']"
-                  ],
-                  "tensor-3d-grid/[>=1.2,<2]": [
-                    "cell_attributes[?attribute_type=='integer']"
-                  ]
-                },
-                "description": "Reference to the attribute in the geoscience object.",
-                "reference_to": "attribute",
-                "title": "Reference",
-                "type": "string"
-              }
-            },
-            "required": [
-              "reference",
-              "name"
-            ],
-            "title": "Number of Duplicates",
-            "type": [
-              "object",
-              "null"
-            ]
-          },
-          "num_equidistant": {
-            "additionalProperties": false,
-            "description": "Attribute containing the number of equidistant samples used in the estimate.",
-            "output": "attribute",
-            "properties": {
-              "name": {
-                "description": "The name of the output attribute.",
-                "title": "Name",
-                "type": "string"
-              },
-              "reference": {
-                "attribute_from": "2/reference",
-                "attribute_path": {
-                  "block-model/[>=1.0,<2]": [
-                    "attributes[?attribute_type=='Int8'||attribute_type=='Int16'||attribute_type=='Int32'||attribute_type=='Int64'||attribute_type=='UInt8'||attribute_type=='UInt16'||attribute_type=='UInt32'||attribute_type=='UInt64']"
-                  ],
-                  "downhole-intervals/[>=1.2,<2]": [
-                    "attributes[?attribute_type=='integer']"
-                  ],
-                  "pointset/[>=1.2,<2]": [
-                    "locations.attributes[?attribute_type=='integer']"
-                  ],
-                  "regular-3d-grid/[>=1.2,<2]": [
-                    "cell_attributes[?attribute_type=='integer']"
-                  ],
-                  "regular-masked-3d-grid/[>=1.2,<2]": [
-                    "cell_attributes[?attribute_type=='integer']"
-                  ],
-                  "tensor-3d-grid/[>=1.2,<2]": [
-                    "cell_attributes[?attribute_type=='integer']"
-                  ]
-                },
-                "description": "Reference to the attribute in the geoscience object.",
-                "reference_to": "attribute",
-                "title": "Reference",
-                "type": "string"
-              }
-            },
-            "required": [
-              "reference",
-              "name"
-            ],
-            "title": "Number of Equidistant Samples",
-            "type": [
-              "object",
-              "null"
-            ]
           },
           "reference": {
             "description": "Reference to a geoscience object.",
@@ -2908,346 +3415,10 @@
             "title": "Reference",
             "type": "string"
           },
-          "sample_count": {
-            "additionalProperties": false,
-            "description": "Attribute containing the number of data samples used in the estimate.",
-            "output": "attribute",
-            "properties": {
-              "name": {
-                "description": "The name of the output attribute.",
-                "title": "Name",
-                "type": "string"
-              },
-              "reference": {
-                "attribute_from": "2/reference",
-                "attribute_path": {
-                  "block-model/[>=1.0,<2]": [
-                    "attributes[?attribute_type=='Int8'||attribute_type=='Int16'||attribute_type=='Int32'||attribute_type=='Int64'||attribute_type=='UInt8'||attribute_type=='UInt16'||attribute_type=='UInt32'||attribute_type=='UInt64']"
-                  ],
-                  "downhole-intervals/[>=1.2,<2]": [
-                    "attributes[?attribute_type=='integer']"
-                  ],
-                  "pointset/[>=1.2,<2]": [
-                    "locations.attributes[?attribute_type=='integer']"
-                  ],
-                  "regular-3d-grid/[>=1.2,<2]": [
-                    "cell_attributes[?attribute_type=='integer']"
-                  ],
-                  "regular-masked-3d-grid/[>=1.2,<2]": [
-                    "cell_attributes[?attribute_type=='integer']"
-                  ],
-                  "tensor-3d-grid/[>=1.2,<2]": [
-                    "cell_attributes[?attribute_type=='integer']"
-                  ]
-                },
-                "description": "Reference to the attribute in the geoscience object.",
-                "reference_to": "attribute",
-                "title": "Reference",
-                "type": "string"
-              }
-            },
-            "required": [
-              "reference",
-              "name"
-            ],
-            "title": "Sample Count",
-            "type": [
-              "object",
-              "null"
-            ]
-          },
           "schema_id": {
             "description": "The ID of the Geoscience Object schema.",
             "title": "Schema ID",
             "type": "string"
-          },
-          "slope": {
-            "additionalProperties": false,
-            "description": "Attribute containing the diagnostic for conditional bias.",
-            "output": "attribute",
-            "properties": {
-              "name": {
-                "description": "The name of the output attribute.",
-                "title": "Name",
-                "type": "string"
-              },
-              "reference": {
-                "attribute_from": "2/reference",
-                "attribute_path": {
-                  "block-model/[>=1.0,<2]": [
-                    "attributes[?attribute_type=='Float64']"
-                  ],
-                  "downhole-intervals/[>=1.2,<2]": [
-                    "attributes[?attribute_type=='scalar']"
-                  ],
-                  "pointset/[>=1.2,<2]": [
-                    "locations.attributes[?attribute_type=='scalar']"
-                  ],
-                  "regular-3d-grid/[>=1.2,<2]": [
-                    "cell_attributes[?attribute_type=='scalar']"
-                  ],
-                  "regular-masked-3d-grid/[>=1.2,<2]": [
-                    "cell_attributes[?attribute_type=='scalar']"
-                  ],
-                  "tensor-3d-grid/[>=1.2,<2]": [
-                    "cell_attributes[?attribute_type=='scalar']"
-                  ]
-                },
-                "description": "Reference to the attribute in the geoscience object.",
-                "reference_to": "attribute",
-                "title": "Reference",
-                "type": "string"
-              }
-            },
-            "required": [
-              "reference",
-              "name"
-            ],
-            "title": "Slope of Regression",
-            "type": [
-              "object",
-              "null"
-            ]
-          },
-          "sum_negative_weights": {
-            "additionalProperties": false,
-            "description": "Attribute containing the sum of negative kriging weights applied to data samples (zero when negative-weight removal is enabled).",
-            "output": "attribute",
-            "properties": {
-              "name": {
-                "description": "The name of the output attribute.",
-                "title": "Name",
-                "type": "string"
-              },
-              "reference": {
-                "attribute_from": "2/reference",
-                "attribute_path": {
-                  "block-model/[>=1.0,<2]": [
-                    "attributes[?attribute_type=='Float64']"
-                  ],
-                  "downhole-intervals/[>=1.2,<2]": [
-                    "attributes[?attribute_type=='scalar']"
-                  ],
-                  "pointset/[>=1.2,<2]": [
-                    "locations.attributes[?attribute_type=='scalar']"
-                  ],
-                  "regular-3d-grid/[>=1.2,<2]": [
-                    "cell_attributes[?attribute_type=='scalar']"
-                  ],
-                  "regular-masked-3d-grid/[>=1.2,<2]": [
-                    "cell_attributes[?attribute_type=='scalar']"
-                  ],
-                  "tensor-3d-grid/[>=1.2,<2]": [
-                    "cell_attributes[?attribute_type=='scalar']"
-                  ]
-                },
-                "description": "Reference to the attribute in the geoscience object.",
-                "reference_to": "attribute",
-                "title": "Reference",
-                "type": "string"
-              }
-            },
-            "required": [
-              "reference",
-              "name"
-            ],
-            "title": "Sum of Negative Weights",
-            "type": [
-              "object",
-              "null"
-            ]
-          },
-          "sum_positive_weights": {
-            "additionalProperties": false,
-            "description": "Attribute containing the sum of positive kriging weights applied to data samples.",
-            "output": "attribute",
-            "properties": {
-              "name": {
-                "description": "The name of the output attribute.",
-                "title": "Name",
-                "type": "string"
-              },
-              "reference": {
-                "attribute_from": "2/reference",
-                "attribute_path": {
-                  "block-model/[>=1.0,<2]": [
-                    "attributes[?attribute_type=='Float64']"
-                  ],
-                  "downhole-intervals/[>=1.2,<2]": [
-                    "attributes[?attribute_type=='scalar']"
-                  ],
-                  "pointset/[>=1.2,<2]": [
-                    "locations.attributes[?attribute_type=='scalar']"
-                  ],
-                  "regular-3d-grid/[>=1.2,<2]": [
-                    "cell_attributes[?attribute_type=='scalar']"
-                  ],
-                  "regular-masked-3d-grid/[>=1.2,<2]": [
-                    "cell_attributes[?attribute_type=='scalar']"
-                  ],
-                  "tensor-3d-grid/[>=1.2,<2]": [
-                    "cell_attributes[?attribute_type=='scalar']"
-                  ]
-                },
-                "description": "Reference to the attribute in the geoscience object.",
-                "reference_to": "attribute",
-                "title": "Reference",
-                "type": "string"
-              }
-            },
-            "required": [
-              "reference",
-              "name"
-            ],
-            "title": "Sum of Positive Weights",
-            "type": [
-              "object",
-              "null"
-            ]
-          },
-          "sum_weights": {
-            "additionalProperties": false,
-            "description": "Attribute containing the sum of kriging weights applied to data samples.",
-            "output": "attribute",
-            "properties": {
-              "name": {
-                "description": "The name of the output attribute.",
-                "title": "Name",
-                "type": "string"
-              },
-              "reference": {
-                "attribute_from": "2/reference",
-                "attribute_path": {
-                  "block-model/[>=1.0,<2]": [
-                    "attributes[?attribute_type=='Float64']"
-                  ],
-                  "downhole-intervals/[>=1.2,<2]": [
-                    "attributes[?attribute_type=='scalar']"
-                  ],
-                  "pointset/[>=1.2,<2]": [
-                    "locations.attributes[?attribute_type=='scalar']"
-                  ],
-                  "regular-3d-grid/[>=1.2,<2]": [
-                    "cell_attributes[?attribute_type=='scalar']"
-                  ],
-                  "regular-masked-3d-grid/[>=1.2,<2]": [
-                    "cell_attributes[?attribute_type=='scalar']"
-                  ],
-                  "tensor-3d-grid/[>=1.2,<2]": [
-                    "cell_attributes[?attribute_type=='scalar']"
-                  ]
-                },
-                "description": "Reference to the attribute in the geoscience object.",
-                "reference_to": "attribute",
-                "title": "Reference",
-                "type": "string"
-              }
-            },
-            "required": [
-              "reference",
-              "name"
-            ],
-            "title": "Sum of Weights",
-            "type": [
-              "object",
-              "null"
-            ]
-          },
-          "valid": {
-            "additionalProperties": false,
-            "description": "Attribute containing the validity flag: 1 where an estimate was produced and 0 where the neighbourhood search found no usable samples.",
-            "output": "attribute",
-            "properties": {
-              "name": {
-                "description": "The name of the output attribute.",
-                "title": "Name",
-                "type": "string"
-              },
-              "reference": {
-                "attribute_from": "2/reference",
-                "attribute_path": {
-                  "block-model/[>=1.0,<2]": [
-                    "attributes[?attribute_type=='Boolean']"
-                  ],
-                  "downhole-intervals/[>=1.2,<2]": [
-                    "attributes[?attribute_type=='bool']"
-                  ],
-                  "pointset/[>=1.2,<2]": [
-                    "locations.attributes[?attribute_type=='bool']"
-                  ],
-                  "regular-3d-grid/[>=1.2,<2]": [
-                    "cell_attributes[?attribute_type=='bool']"
-                  ],
-                  "regular-masked-3d-grid/[>=1.2,<2]": [
-                    "cell_attributes[?attribute_type=='bool']"
-                  ],
-                  "tensor-3d-grid/[>=1.2,<2]": [
-                    "cell_attributes[?attribute_type=='bool']"
-                  ]
-                },
-                "description": "Reference to the attribute in the geoscience object.",
-                "reference_to": "attribute",
-                "title": "Reference",
-                "type": "string"
-              }
-            },
-            "required": [
-              "reference",
-              "name"
-            ],
-            "title": "Valid",
-            "type": [
-              "object",
-              "null"
-            ]
-          },
-          "variance": {
-            "additionalProperties": false,
-            "description": "Attribute containing the kriging variance (estimation uncertainty).",
-            "output": "attribute",
-            "properties": {
-              "name": {
-                "description": "The name of the output attribute.",
-                "title": "Name",
-                "type": "string"
-              },
-              "reference": {
-                "attribute_from": "2/reference",
-                "attribute_path": {
-                  "block-model/[>=1.0,<2]": [
-                    "attributes[?attribute_type=='Float64']"
-                  ],
-                  "downhole-intervals/[>=1.2,<2]": [
-                    "attributes[?attribute_type=='scalar']"
-                  ],
-                  "pointset/[>=1.2,<2]": [
-                    "locations.attributes[?attribute_type=='scalar']"
-                  ],
-                  "regular-3d-grid/[>=1.2,<2]": [
-                    "cell_attributes[?attribute_type=='scalar']"
-                  ],
-                  "regular-masked-3d-grid/[>=1.2,<2]": [
-                    "cell_attributes[?attribute_type=='scalar']"
-                  ],
-                  "tensor-3d-grid/[>=1.2,<2]": [
-                    "cell_attributes[?attribute_type=='scalar']"
-                  ]
-                },
-                "description": "Reference to the attribute in the geoscience object.",
-                "reference_to": "attribute",
-                "title": "Reference",
-                "type": "string"
-              }
-            },
-            "required": [
-              "reference",
-              "name"
-            ],
-            "title": "Variance",
-            "type": [
-              "object",
-              "null"
-            ]
           }
         },
         "required": [
@@ -3255,23 +3426,7 @@
           "name",
           "description",
           "schema_id",
-          "attribute",
-          "valid",
-          "variance",
-          "slope",
-          "efficiency",
-          "mean",
-          "sample_count",
-          "num_drillholes",
-          "num_duplicates",
-          "num_equidistant",
-          "sum_weights",
-          "sum_positive_weights",
-          "sum_negative_weights",
-          "min_distance",
-          "mean_distance",
-          "aniso_min_distance",
-          "aniso_mean_distance"
+          "attribute"
         ],
         "title": "Target",
         "type": "object"

@@ -1,6 +1,6 @@
 {
   "display_name": "UBC Import",
-  "version": "0.1.30",
+  "version": "0.1.31",
   "feature_flag": "converter-preview",
   "description": "Task to import UBC Grids into Evo as Tensor-3D geoscience objects.",
   "parameters": {

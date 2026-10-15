@@ -1,6 +1,6 @@
 {
   "display_name": "Parameterize Volumes",
-  "version": "1.5.8",
+  "version": "1.5.16",
   "feature_flag": "geotech-preview",
   "description": "Parameterizes closed volumes from Triangle Mesh or Geological Model Meshes inputs and writes the result as a Design Geometry object.",
   "parameters": {

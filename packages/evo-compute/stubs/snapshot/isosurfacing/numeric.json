@@ -1,7 +1,7 @@
 {
   "display_name": "Numeric",
-  "version": "0.1.3",
-  "feature_flag": "",
+  "version": "0.1.4",
+  "feature_flag": "isosurfacing-preview",
   "description": "Generate an isosurface at a specified threshold value from numeric attributes on 3D grids. Supports regular, tensor, masked, block model, and unstructured hexahedral and tetrahedral grids.",
   "parameters": {
     "additionalProperties": false,

@@ -1,6 +1,6 @@
 {
   "display_name": "Mark Volumes For Removal",
-  "version": "1.5.8",
+  "version": "1.5.16",
   "feature_flag": "geotech-preview",
   "description": "Marks specified volumes in a Geological Model Meshes for removal by setting their material to external, or clears the marking.",
   "parameters": {

@@ -1,6 +1,6 @@
 {
   "display_name": "Break ties",
-  "version": "0.7.1",
+  "version": "0.8.0",
   "feature_flag": "geostatistics-preview",
   "description": "For more information, please read the <a href='/docs/guides/geostatistics-tasks/tasks/break-ties'>guide</a>",
   "parameters": {

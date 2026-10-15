@@ -1,6 +1,6 @@
 {
   "display_name": "Make Into Model Input",
-  "version": "1.5.8",
+  "version": "1.5.16",
   "feature_flag": "geotech-preview",
   "description": "Clips a triangle mesh loosely to the specified bounds, merges duplicate points, and translates the result so it can be used as model input.",
   "parameters": {

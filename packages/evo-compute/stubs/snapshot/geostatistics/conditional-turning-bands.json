@@ -1,6 +1,6 @@
 {
   "display_name": "Conditional turning bands",
-  "version": "0.7.1",
+  "version": "0.8.0",
   "feature_flag": "geostatistics-preview",
   "description": "Runs the turning band simulator using an existing continuous distribution. For more information, please read the <a href='/docs/guides/geostatistics-tasks/tasks/conditional-turning-bands'>guide</a>",
   "parameters": {

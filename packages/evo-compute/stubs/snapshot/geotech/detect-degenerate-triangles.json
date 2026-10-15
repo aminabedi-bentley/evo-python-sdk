@@ -1,6 +1,6 @@
 {
   "display_name": "Detect Degenerate Triangles",
-  "version": "1.5.8",
+  "version": "1.5.16",
   "feature_flag": "geotech-preview",
   "description": "Identifies needle and cap triangles in a Triangle Mesh or Geological Model Meshes object.",
   "parameters": {

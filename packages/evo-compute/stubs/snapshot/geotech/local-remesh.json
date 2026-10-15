@@ -1,6 +1,6 @@
 {
   "display_name": "Local Remesh",
-  "version": "1.5.8",
+  "version": "1.5.16",
   "feature_flag": "geotech-preview",
   "description": "Locally remeshes the region around selected seed triangles in a Geological Model Meshes object using configurable remeshing parameters and radius-based region growth.",
   "parameters": {
@@ -26,6 +26,7 @@
             "optimize": true,
             "patch_angle_tolerance": 10,
             "regularize_mode": false,
+            "relax_chunk_interfaces": false,
             "shape_quality_weight": 0.6,
             "strain_tolerance": 0.3,
             "target_h": 0
@@ -73,6 +74,12 @@
             "default": false,
             "description": "If true, do not remesh; only regularize the mesh.",
             "title": "Regularize Mode",
+            "type": "boolean"
+          },
+          "relax_chunk_interfaces": {
+            "default": false,
+            "description": "Whether to relax chunk interfaces during remeshing.",
+            "title": "Relax Chunk Interfaces",
             "type": "boolean"
           },
           "shape_quality_weight": {

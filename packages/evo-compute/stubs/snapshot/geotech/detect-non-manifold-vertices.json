@@ -1,6 +1,6 @@
 {
   "display_name": "Detect Non-Manifold Vertices",
-  "version": "1.5.8",
+  "version": "1.5.16",
   "feature_flag": "geotech-preview",
   "description": "Identifies vertices with non-manifold topology in a Triangle Mesh or Geological Model Meshes object.",
   "parameters": {

@@ -1,6 +1,6 @@
 {
   "display_name": "Profit calculation",
-  "version": "0.7.1",
+  "version": "0.8.0",
   "feature_flag": "geostatistics-preview",
   "description": "Calculate profit given block model and economic parameters",
   "parameters": {

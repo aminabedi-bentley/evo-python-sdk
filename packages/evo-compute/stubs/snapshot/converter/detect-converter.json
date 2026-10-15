@@ -1,6 +1,6 @@
 {
   "display_name": "Detect Converter",
-  "version": "0.1.30",
+  "version": "0.1.31",
   "feature_flag": "converter-preview",
   "description": "Accepts one or more file references, inspects each file's extension, and returns which converter task(s) and geoscience object schema(s) are available for importing each file.",
   "parameters": {

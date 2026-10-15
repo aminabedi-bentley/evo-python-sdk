@@ -764,6 +764,25 @@ class TestDeepValidationAgreement(unittest.TestCase):
     def test_a_payload_the_stub_accepts_passes_deep_validation(self) -> None:
         validate_parameters(self._task("declustering"), _DECLUSTERING_PAYLOAD, deep=True)  # does not raise
 
+    def test_native_kriging_diagnostics_pass_the_captured_schema(self) -> None:
+        from evo.compute.tasks import Source, Target
+        from evo.compute.tasks.geostatistics.kriging import KrigingDiagnostics, KrigingParameters
+        from test_payload_parity import POINTSET_URL, TARGET_URL, VARIOGRAM_URL, _search
+
+        parameters = KrigingParameters(
+            source=Source(object=POINTSET_URL, attribute="locations.attributes[?name=='Cu_pct']"),
+            target=Target.new_attribute(TARGET_URL, "Cu_OK"),
+            variogram=VARIOGRAM_URL,
+            neighborhood=_search(),
+            diagnostics=KrigingDiagnostics(kriging_variance=True),
+        )
+        payload = parameters.model_dump(mode="json", by_alias=True, exclude_none=True)
+        validate_parameters(self._task("kriging"), payload, deep=True)
+
+        payload["target"]["diagnostics"]["kriging_variance"]["name"] = 123
+        with self.assertRaisesRegex(ParameterValidationError, r"target\.diagnostics\.kriging_variance"):
+            validate_parameters(self._task("kriging"), payload, deep=True)
+
     def test_a_reference_no_handle_could_produce_is_type_checked(self) -> None:
         payload = {**_DECLUSTERING_PAYLOAD, "source": {"object": 12345}}
         with self.assertRaises(ParameterValidationError) as ctx:

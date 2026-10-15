@@ -1,6 +1,6 @@
 {
   "display_name": "Stratify task",
-  "version": "0.1.47",
+  "version": "0.1.57",
   "feature_flag": "cpt-to-borehole-preview",
   "description": "Classifies and stratifies CPT data into geological layers based on predefined criteria and algorithms, facilitating geotechnical analysis and modeling.",
   "parameters": {
@@ -28,7 +28,8 @@
               "description": "Filtering method to use for the classification of the CPT/hole.",
               "enum": [
                 "no_filtering",
-                "inverse_filtering"
+                "inverse_filtering",
+                "nearfield_inverse_filtering"
               ],
               "title": "Filtering method"
             },
@@ -346,6 +347,15 @@
           "additionalProperties": false,
           "description": "Normalized cost variation chart data for one hole.",
           "properties": {
+            "first_minimum_cost_number_of_layers": {
+              "default": null,
+              "description": "Number of layers at the first local minimum of the normalized cost curve, if available.",
+              "title": "First minimum cost number of layers",
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
             "object_id": {
               "description": "Identifier of the object (meaning the hole id, e.g. \"CPT_1\") this normalized cost variation entry relates to.",
               "title": "Object ID",

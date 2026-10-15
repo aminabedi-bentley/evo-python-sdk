@@ -1,6 +1,6 @@
 {
   "display_name": "Publish task",
-  "version": "0.1.47",
+  "version": "0.1.57",
   "feature_flag": "cpt-to-borehole-preview",
   "description": "Publish a finalized downhole collection as a new geoscience object for downstream consumption.",
   "parameters": {

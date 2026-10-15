@@ -1,6 +1,6 @@
 {
   "display_name": "Init Aggregate Geom GMM",
-  "version": "1.5.8",
+  "version": "1.5.16",
   "feature_flag": "geotech-preview",
   "description": "Creates a rotated bounding box as a Geological Model Meshes object, used as the initial intersected geometry when creating a model.",
   "parameters": {
