@@ -17,11 +17,16 @@ so mistakes surface locally with actionable messages instead of as opaque platfo
 errors:
 
 * **Shallow** (always on): required-field presence on the resolved payload. Signature
-  binding in :mod:`evo.compute.engine` already rejects unknown/missing keyword
-  arguments; this adds the schema-driven guard that a required field wasn't supplied
+    binding in :mod:`evo.compute.engine` already rejects missing required keyword
+    arguments; this adds the schema-driven guard that a required field wasn't supplied
   as ``None`` unless its schema permits null.
-* **Deep** (opt-in): full JSON Schema Draft 2020-12 validation, including ``$ref`` /
+* **Deep** (opt-in): JSON Schema Draft 2020-12 constraints on known fields, including ``$ref`` /
   ``$defs`` resolution and discriminated unions, via :mod:`jsonschema`.
+
+Fields absent from discovery are forwarded unchanged, including under deep validation.
+The engine warns during reference resolution, since an older catalogue cannot determine
+whether those fields are newer service inputs or spelling mistakes. Explicit schemas for
+additional-property values still apply; only closed-object restrictions are relaxed.
 
 Reference leaves (properties carrying a ``reference_to`` annotation) are relaxed, because
 the concrete object/attribute/file shape the schema declares is produced by the
@@ -39,6 +44,8 @@ the platform introduces a schema annotation the engine does not know how to hand
 
 from __future__ import annotations
 
+import logging
+import re
 from collections.abc import Iterator
 from typing import Any
 
@@ -52,6 +59,8 @@ __all__ = [
     "unknown_annotation_keys",
     "validate_parameters",
 ]
+
+logger = logging.getLogger("compute.validation")
 
 
 KNOWN_SCHEMA_ANNOTATIONS: frozenset[str] = frozenset(
@@ -385,9 +394,40 @@ def _validate_required(spec: TaskResource, parameters: dict[str, Any], label: st
         )
 
 
+def _warn_unknown_fields(node: dict[str, Any], value: dict[str, Any], path: list[str], label: str) -> None:
+    """Warn about fields without a discovery description, without logging their values."""
+    properties = node.get("properties")
+    additional = node.get("additionalProperties")
+    if properties is None and additional is not False:
+        return
+    if additional is True or isinstance(additional, dict):
+        return
+    patterns = node.get("patternProperties", {}) or {}
+    unknown = sorted(
+        (
+            name
+            for name in value
+            if name not in (properties or {}) and not any(re.search(pattern, str(name)) for pattern in patterns)
+        ),
+        key=str,
+    )
+    if unknown:
+        logger.warning(
+            "%s: fields not described by discovery at %s: %s. Forwarding them unchanged to the service; "
+            "check the names and provide values in wire format.",
+            label,
+            ".".join(str(part) for part in path) or "parameters",
+            ", ".join(repr(name) for name in unknown),
+        )
+
+
 def _validate_deep(spec: TaskResource, parameters: dict[str, Any], label: str) -> None:
-    """Deep check: validate the payload against the task schema (reference leaves relaxed)."""
+    """Check known constraints without blocking fields an older catalogue cannot describe."""
     schema = _relax_reference_leaves(spec.parameters or {})
+    for node in _iter_schema_nodes(schema):
+        for keyword in ("additionalProperties", "unevaluatedProperties"):
+            if node.get(keyword) is False:
+                node[keyword] = True
     validator = Draft202012Validator(schema)
     # Rendered parts keep the key uniformly typed: raw paths mix str and int and won't sort.
     errors = sorted(validator.iter_errors(parameters), key=lambda error: [str(part) for part in error.absolute_path])
@@ -412,7 +452,8 @@ def validate_parameters(
 
     :param spec: The discovered task, carrying its ``parameters`` JSON Schema.
     :param parameters: The resolved payload about to be submitted.
-    :param deep: When ``True``, also run full JSON Schema Draft 2020-12 validation.
+    :param deep: When ``True``, check known JSON Schema Draft 2020-12 constraints.
+        Closed-object restrictions do not reject fields missing from discovery.
     :param task_label: A ``topic.task`` label for error messages; derived from ``spec``
         when omitted.
 

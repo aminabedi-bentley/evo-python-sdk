@@ -17,28 +17,48 @@ than a pile of broken code.
 """
 
 from evo.common import IContext
+from pydantic import BaseModel
 
 from evo.compute import ComputeClient
 
 EXPECTED_ERRORS = [
-    "geology",  # topic that is not in the catalogue snapshot
-    "made_up_task",  # task that is not in the catalogue snapshot
     "neighborhood",  # required parameter omitted
     "sourse",  # misspelled parameter
     "power",  # wrong scalar type
     "method",  # value outside the schema's enum
     "upper_case",  # result attribute used as something other than the type it declares
+    "NotANeighborhood",
 ]
 
 
-async def unknown_topic(context: IContext) -> None:
-    client = ComputeClient(context)
-    await client.geology.declustering.run()
+class NotANeighborhood(BaseModel):
+    value: str
 
 
-async def unknown_task(context: IContext) -> None:
+async def unrelated_neighborhood_model_async(context: IContext) -> None:
     client = ComputeClient(context)
-    await client.geostatistics.made_up_task.run()
+    await client.geostatistics.declustering.run(
+        source="https://example.com/objects/samples",
+        grid="https://example.com/objects/grid",
+        target={"object": "https://example.com/objects/target", "attribute": "weights"},
+        neighborhood=NotANeighborhood(value="invalid"),
+    )
+
+
+async def malformed_neighborhood_dictionary(context: IContext) -> None:
+    client = ComputeClient(context)
+    await client.geostatistics.declustering.run(
+        source="https://example.com/objects/samples",
+        grid="https://example.com/objects/grid",
+        target={"object": "https://example.com/objects/target", "attribute": "weights"},
+        neighborhood={
+            "ellipsoid": {
+                "ellipsoid_ranges": {"major": 200.0, "semi_major": 150.0, "minor": 100.0},
+                "rotation": {"dip_azimuth": 45.0, "dip": 10.0, "pitch": 5.0},
+            },
+            "max_samples": "invalid",
+        },
+    )
 
 
 async def missing_required_parameter(context: IContext) -> None:
@@ -94,7 +114,7 @@ async def wrong_scalar_type(context: IContext) -> None:
 
 async def value_outside_the_enum(context: IContext) -> None:
     client = ComputeClient(context)
-    await client.geostatistics.normal_score_gcp.run(
+    await client.geostatistics.normal_score.run(
         method="sideways",
         source={"object": "https://example.com/objects/samples", "attribute": "grade"},
         distribution="https://example.com/objects/distribution",
@@ -112,7 +132,7 @@ async def misused_result_attribute(context: IContext) -> None:
     their real types all the way down, which is what this checks.
     """
     client = ComputeClient(context)
-    result = await client.geostatistics.normal_score_gcp.run(
+    result = await client.geostatistics.normal_score.run(
         method="forward",
         source={"object": "https://example.com/objects/samples", "attribute": "grade"},
         distribution="https://example.com/objects/distribution",

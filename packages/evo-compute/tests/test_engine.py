@@ -36,8 +36,6 @@ def _object_url(suffix: str) -> str:
 
 
 SOURCE_URL = _object_url("10")
-TARGET_URL = _object_url("20")
-VARIOGRAM_URL = _object_url("30")
 FILE_URL = "https://unittest.localhost/file/v2/orgs/00000000-0000-0000-0000-000000000001/files/mesh"
 
 
@@ -111,13 +109,33 @@ class TestComputeClient(TestWithConnector):
             await self.client.geostatistics.normal_score_gcp.run(distribution=SOURCE_URL)
         self.assertEqual("normal-score-gcp", submit.await_args.kwargs["task"])
 
+    async def test_hyphenated_topic_names_are_reachable_with_underscores(self) -> None:
+        """``vis_service`` resolves to the platform's ``vis-service``.
+
+        Topics need the same treatment as tasks: the catalogue publishes several hyphenated
+        ones and no attribute access can spell them otherwise.
+        """
+        with self.catalogue_response(), self.mock_job_client() as submit:
+            await self.client.vis_service.tiling.run(object_url=SOURCE_URL, s2s_user_info="{}")
+        self.assertEqual("vis-service", submit.await_args.kwargs["topic"])
+
+    async def test_a_hyphenated_parameter_reaches_the_wire_with_its_published_name(self) -> None:
+        """``s2s_user_info`` is how it is typed; ``s2s-user-info`` is what is sent.
+
+        No keyword can spell the published name, so the engine normalises it like everything
+        else and puts the platform's own spelling back on the payload.
+        """
+        with self.catalogue_response(), self.mock_job_client() as submit:
+            await self.client.vis_service.tiling.run(object_url=SOURCE_URL, s2s_user_info="{}")
+
+        parameters = submit.await_args.kwargs["parameters"]
+        self.assertEqual({"object_url": SOURCE_URL, "s2s-user-info": "{}"}, parameters)
+
     async def test_catalogue_is_cached_across_runs(self) -> None:
         """The catalogue is fetched once and reused for later runs (any task/topic)."""
         with self.catalogue_response(), self.mock_job_client():
             await self.client.geostatistics.declustering.run(source=SOURCE_URL)
-            await self.client.geostatistics.kriging_gcp.run(
-                source=SOURCE_URL, target=TARGET_URL, variogram=VARIOGRAM_URL
-            )
+            await self.client.geostatistics.normal_score_gcp.run(distribution=SOURCE_URL)
         self.assertEqual(1, self.transport.request.call_count)
 
     async def test_catalogue_is_shared_across_topics(self) -> None:
@@ -160,17 +178,13 @@ class TestComputeClient(TestWithConnector):
     async def test_preview_defaults_to_feature_flag(self) -> None:
         """A feature-flagged task opts into preview by default."""
         with self.catalogue_response(), self.mock_job_client() as submit:
-            await self.client.geostatistics.kriging_gcp.run(
-                source=SOURCE_URL, target=TARGET_URL, variogram=VARIOGRAM_URL
-            )
+            await self.client.converter.obj_import.run(file=FILE_URL)
         self.assertTrue(submit.await_args.kwargs["preview"])
 
     async def test_preview_can_be_overridden(self) -> None:
         """An explicit preview flag overrides the feature-flag default."""
         with self.catalogue_response(), self.mock_job_client() as submit:
-            await self.client.geostatistics.kriging_gcp.run(
-                source=SOURCE_URL, target=TARGET_URL, variogram=VARIOGRAM_URL, preview=False
-            )
+            await self.client.converter.obj_import.run(file=FILE_URL, preview=False)
         self.assertFalse(submit.await_args.kwargs["preview"])
         self.assertNotIn("preview", submit.await_args.kwargs["parameters"])
 
@@ -191,17 +205,102 @@ class TestComputeClient(TestWithConnector):
         self.assertIn("source", str(ctx.exception))
         submit.assert_not_awaited()
 
-    async def test_unexpected_parameter_raises_validation_error(self) -> None:
-        """An unknown keyword argument is rejected, and the error names the task."""
+    async def test_unknown_parameter_warns_and_is_forwarded(self) -> None:
+        """Discovery drift warns without dropping a caller's newer parameter."""
         with self.catalogue_response(), self.mock_job_client() as submit:
-            with self.assertRaises(ParameterValidationError) as ctx:
+            with self.assertLogs("compute.validation", level="WARNING") as logged:
                 await self.client.geostatistics.declustering.run(source=SOURCE_URL, bogus=1)
 
-        self.assertIn("geostatistics.declustering.run():", str(ctx.exception))
-        self.assertIn("bogus", str(ctx.exception))
-        # Binding failures populate ``errors`` too, so callers never have to parse the message.
-        self.assertEqual(["got an unexpected keyword argument 'bogus'"], ctx.exception.errors)
-        submit.assert_not_awaited()
+        self.assertIn("geostatistics.declustering", "\n".join(logged.output))
+        self.assertIn("bogus", "\n".join(logged.output))
+        self.assertEqual({"source": SOURCE_URL, "bogus": 1}, submit.await_args.kwargs["parameters"])
+        submit.assert_awaited_once()
+
+    async def test_unknown_fields_warn_and_are_preserved_in_both_modes(self) -> None:
+        spec = next(task for task in self.catalogue["results"] if task["name"] == "declustering")
+        spec["parameters"]["additionalProperties"] = False
+        spec["parameters"]["properties"]["settings"] = {
+            "type": "object",
+            "properties": {"count": {"type": "integer", "minimum": 1}},
+            "required": ["count"],
+            "additionalProperties": False,
+        }
+        parameters = {
+            "source": SOURCE_URL,
+            "settings": {"count": 2, "new_option": False, 0: None},
+            "future-parameter": {"unset": None, "secret": "do-not-log-this-value"},
+        }
+        for validate, deep in ((True, False), (True, True), (False, False)):
+            with self.subTest(validate=validate, deep=deep):
+                client = ComputeClient(self.context, validate=validate, deep_validation=deep)
+                with (
+                    self.catalogue_response(),
+                    self.mock_job_client() as submit,
+                    self.assertLogs("compute.validation", level="WARNING") as logged,
+                ):
+                    await client.geostatistics.declustering.run(**parameters)
+                self.assertEqual(parameters, submit.await_args.kwargs["parameters"])
+                self.assertEqual(2, len(logged.output))
+                messages = "\n".join(logged.output)
+                self.assertIn("future-parameter", messages)
+                self.assertIn("settings", messages)
+                self.assertIn("new_option", messages)
+                self.assertNotIn("do-not-log-this-value", messages)
+                submit.assert_awaited_once()
+
+    async def test_unknown_nested_fields_warn_through_schema_containers(self) -> None:
+        spec = next(task for task in self.catalogue["results"] if task["name"] == "declustering")
+        schema = spec["parameters"]
+        schema["$defs"] = {
+            "Config": {
+                "discriminator": {"propertyName": "kind"},
+                "oneOf": [
+                    {
+                        "type": "object",
+                        "properties": {"kind": {"const": "ordinary"}},
+                        "required": ["kind"],
+                        "additionalProperties": False,
+                    },
+                    {
+                        "type": "object",
+                        "properties": {"kind": {"const": "simple"}, "count": {"type": "integer", "minimum": 1}},
+                        "required": ["kind", "count"],
+                        "additionalProperties": False,
+                    },
+                ],
+            }
+        }
+        schema["properties"].update(
+            {
+                "configs": {"type": "array", "items": {"$ref": "#/$defs/Config"}},
+                "by_name": {"type": "object", "additionalProperties": {"$ref": "#/$defs/Config"}},
+                "empty": {"type": "object", "properties": {}, "additionalProperties": False},
+            }
+        )
+        parameters = {
+            "source": SOURCE_URL,
+            "configs": [{"kind": "simple", "count": 2, "new_option": False}],
+            "by_name": {
+                "first": {"kind": "ordinary", "new_option": None},
+                0: {"kind": "ordinary", "new_option": False},
+            },
+            "empty": {"new_option": True},
+        }
+        for deep in (False, True):
+            with self.subTest(deep=deep):
+                client = ComputeClient(self.context, deep_validation=deep)
+                with (
+                    self.catalogue_response(),
+                    self.mock_job_client() as submit,
+                    self.assertLogs("compute.validation", level="WARNING") as logged,
+                ):
+                    await client.arun("geostatistics", "declustering", parameters)
+                self.assertEqual(parameters, submit.await_args.kwargs["parameters"])
+                self.assertEqual(4, len(logged.output))
+                messages = "\n".join(logged.output)
+                for path in ("configs.0", "by_name.first", "by_name.0", "empty"):
+                    self.assertIn(path, messages)
+                submit.assert_awaited_once()
 
     # -- progressive ergonomics (cache-backed, no forced discovery) -------- #
 

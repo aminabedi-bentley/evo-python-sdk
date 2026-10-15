@@ -69,6 +69,7 @@ from .tasks.common.source_target import (
     _source_from_attribute,
     _validate_target_attribute,
 )
+from .validation import _warn_unknown_fields
 
 __all__ = [
     "ReferenceResolver",
@@ -160,6 +161,7 @@ class ReferenceResolver:
             check_schemas=check_schemas,
         )
         properties = schema.get("properties", {}) or {}
+        _warn_unknown_fields(schema, parameters, [], walk.label)
         for name, value in parameters.items():
             node = _deref(properties.get(name, {}), schema)
             walk.resolved[name] = await self._resolve_node(node, value, [name], walk)
@@ -195,7 +197,12 @@ class ReferenceResolver:
         if not isinstance(value, (dict, AnyTypedAttribute)) and hasattr(value, "model_dump"):
             value = value.model_dump(mode="json", by_alias=True)
 
-        if properties := node.get("properties"):
+        properties = node.get("properties", {}) or {}
+        additional = node.get("additionalProperties")
+        if isinstance(value, dict):
+            _warn_unknown_fields(node, value, path, walk.label)
+
+        if properties or isinstance(additional, dict):
             if (frame := self._frame_from_attribute(properties, value, path, walk)) is not None:
                 # Carry on into the walk below rather than returning: the frame's object leaf
                 # has to face ``supported_schemas`` like any other.
@@ -209,7 +216,9 @@ class ReferenceResolver:
                 resolved: dict[str, Any] = {}
                 _graft(walk.resolved, path, resolved)
                 for key, child in value.items():
-                    child_node = _deref(properties.get(key, {}), walk.schema)
+                    child_node = _deref(
+                        properties.get(key, additional if isinstance(additional, dict) else {}), walk.schema
+                    )
                     resolved[key] = await self._resolve_node(child_node, child, [*path, key], walk)
                 return resolved
 
