@@ -1,14 +1,15 @@
 # Static typing for the generic compute engine
 
 `ComputeClient` builds its `client.<topic>.<task>.run(...)` namespace at runtime from the
-live discovery catalogue. Nothing about that surface exists in `engine.py`, so a type
+live discovery catalogue, with `submit(...)` for generic tasks. Nothing about that surface exists in `engine.py`, so a type
 checker sees `Any` and an editor offers no completion.
 
 This directory closes that gap. An **offline** generator turns a checked-in snapshot of the
 task catalogue into [`src/evo/compute/engine.pyi`](../src/evo/compute/engine.pyi), which
 type checkers read instead of `engine.py`. Every snapshotted task then gets completion,
 signature help, hover documentation, parameter type-checking and a typed result through
-the async client.
+the async client. Submission returns `TaskJob[TaskResultType]`, preserving that result type
+through `await job.results()`.
 
 ```
 stubs/
@@ -35,6 +36,11 @@ result = await client.geostatistics.declustering.run(
 print(result["message"])           # the raw payload is still a dict
 weights = await result.target.attribute.to_dataframe()   # and the references load
 ```
+
+`submit(...)` uses the same parameter types as `run(...)`, but returns a job without waiting.
+Its status, cancellation and results methods are async. A task absent from the snapshot
+still exposes both operations, with generic `TaskResult` hints. Overrides expose their own
+declared methods: Kriging is run-only, with client `asubmit(...)` as its generic alternative.
 
 To name a shape in your own annotations, import it under `TYPE_CHECKING`. The generated
 types exist only in the stub — they are not runtime objects:
@@ -157,7 +163,7 @@ The stub is one half of a contract the engine enforces at run time from the same
 
 | Mistake | Caught statically by | Caught at run time by |
 |---|---|---|
-| unknown topic or task | *nothing — by design* | discovery lookup in `arun` |
+| unknown topic or task | *nothing — by design* | discovery lookup in `arun` / `asubmit` |
 | unknown parameter | the stub's `run(...)` signature | warning only; forwarded unchanged, including under deep validation |
 | missing required parameter | the stub's `run(...)` signature | signature binding, then `validate_parameters` |
 | wrong scalar type, bad enum member, missing nested field | the stub's `TypedDict`s and `Literal`s | `validate_parameters(..., deep=True)` |
@@ -174,14 +180,14 @@ unchanged in both validation modes. Only closed-object restrictions are relaxed;
 types, bounds, enums, required fields and explicit additional-property value schemas still
 apply. Unknown values must already use the service's wire format, since the engine has no
 annotations to resolve their references. The generated hints stay precise for captured
-fields; `arun` accepts dictionaries for newer inputs absent from those hints.
+fields; `arun` and `asubmit` accept dictionaries for newer inputs absent from those hints.
 
 ## Verified with
 
 | Checker | Result |
 |---|---|
-| pyright | `usage_ok.py` clean; `usage_bad.py` reports all seven mistakes |
-| mypy | `usage_ok.py` clean; `usage_bad.py` reports all seven mistakes |
+| pyright | `usage_ok.py` clean; `usage_bad.py` reports the expected errors |
+| mypy | `usage_ok.py` clean; `usage_bad.py` reports the expected errors |
 | PyCharm / VS Code | completion, signature help and hover text on `client.<topic>.<task>.run(...)` |
 
 `tests/test_stubgen.py` runs both. `mypy` is an evo-compute test dependency, so that check

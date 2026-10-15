@@ -135,6 +135,10 @@ class TestTheSeam(OverrideTestCase):
     def test_the_override_remains_async_without_a_blocking_wrapper(self) -> None:
         self.assertTrue(inspect.iscoroutinefunction(self.client.geostatistics.kriging.run))
 
+    def test_the_override_does_not_publish_submit(self) -> None:
+        with self.assertRaises(AttributeError):
+            _ = self.client.geostatistics.kriging.submit
+
     def test_every_other_task_stays_generic(self) -> None:
         """An override is one task opting out, not a change to how tasks are reached."""
         self.assertIsInstance(self.client.geostatistics.declustering, _TaskProxy)
@@ -172,6 +176,22 @@ class TestTheSeam(OverrideTestCase):
         with self.catalogue, _capture_submit("evo.compute.engine") as submit:
             with self.assertRaises(_SubmitCaptured):
                 await self.client.arun(
+                    "geostatistics",
+                    "kriging",
+                    {
+                        "source": {"object": POINTSET_URL, "attribute": GRADE_ATTRIBUTE},
+                        "target": {"object": TARGET_URL, "attribute": {"operation": "create", "name": "grade"}},
+                        "variogram": VARIOGRAM_URL,
+                        "neighborhood": _search().model_dump(),
+                        "kriging_method": {"type": "ordinary"},
+                    },
+                )
+        self.assertEqual("kriging", submit.await_args.kwargs["task"])
+
+    async def test_asubmit_always_takes_the_generic_path(self) -> None:
+        with self.catalogue, _capture_submit("evo.compute.engine") as submit:
+            with self.assertRaises(_SubmitCaptured):
+                await self.client.asubmit(
                     "geostatistics",
                     "kriging",
                     {

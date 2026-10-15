@@ -63,6 +63,54 @@ checks and native `KrigingResult`. Other tasks use the schema-driven generic sur
 with the task's wire parameter names, even for a task with an override or no snapshot.
 The existing lowercase task modules and `await tasks.run(manager, parameters)` API are unchanged.
 
+Existing parameter models also use the generic engine through `tasks.run`:
+
+```python
+from evo.compute import tasks
+
+results = await tasks.run(
+    manager, [kriging_parameters, idw_parameters, knn_parameters], preview=True
+)
+```
+
+The models keep their existing serialization, including defaults, filters and diagnostics.
+The engine shares discovery across the batch and submits jobs concurrently; registered
+runners convert their results back to the native SDK classes. A single input still returns
+its native result, and a list still returns an ordered `TaskResultList` with notebook
+formatting and aggregate progress. Preview remains an explicit opt-in on this facade.
+These calls now require access to the task catalogue as well as job submission. Direct
+`TaskRunner` usage remains available as the lower-level API.
+
+The [estimation engine notebook](docs/examples/estimation_engine.ipynb) follows the
+existing estimation workflow, showing both the unchanged `tasks.run(...)` call and
+explicit async job submission with the same parameter models, result queries and plots.
+
+### Submitting and managing jobs
+
+Generic tasks expose async `submit(...)` to return the accepted job without waiting:
+
+```python
+job = await client.geostatistics.declustering.submit(
+    source=samples,
+    grid=grid,
+    target=weights,
+    neighborhood=search,
+    preview=True,
+)
+progress = await job.status()
+result = await job.results()
+dataframe = await result.target.attribute.to_dataframe()
+```
+
+`TaskJob` preserves the job's `id`, `url`, `topic` and `task`. Use `await job.cancel()`
+to request cancellation, and `await job.status()` to observe it. `job.results()` accepts
+feedback, polling interval and retry overrides; feedback set with `ComputeClient(manager,
+fb=feedback)` is inherited by each job. Callbacks run on the caller's async event loop.
+
+`run(...)` still waits for results using the same preparation and hydration path. The
+Kriging override remains run-only. `await client.asubmit(topic, task, parameters)` is the
+explicit generic submission route, including for overridden or unsnapshotted tasks.
+
 ### Static typing for the generic engine
 
 `ComputeClient` resolves `client.<topic>.<task>.run(...)` from the live task catalogue, so

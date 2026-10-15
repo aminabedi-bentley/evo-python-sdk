@@ -30,8 +30,13 @@ Discovery is performed the first time a task within a topic is ``run(...)``. The
 catalogue is then held by the underlying :class:`~evo.compute.discovery.DiscoveryClient`,
 so repeated runs are served from there until its cache expires.
 
+``run(...)`` submits and waits for hydrated results. ``submit(...)`` returns a
+:class:`~evo.compute.jobs.TaskJob` without waiting, exposing status and cancellation.
+Both paths share the same discovery, parameter preparation and result hydration.
+
 A task can opt into a hand-written surface through :mod:`evo.compute.overrides`.
-``arun`` remains the explicit generic route, including for overridden tasks.
+``arun`` and ``asubmit`` remain the explicit generic routes, including for overridden
+tasks. The Kriging override publishes ``run`` alone.
 """
 
 from __future__ import annotations
@@ -42,11 +47,14 @@ from typing import Any, Literal, Optional, Union
 from uuid import UUID
 
 from evo.common import APIConnector, IContext
+from evo.common.interfaces import IFeedback
+from evo.common.utils import NoFeedback
 
 from .client import JobClient
 from .discovery import DEFAULT_CACHE_TTL_SECONDS, DiscoveryClient
 from .endpoints.models import TaskResource
 from .exceptions import ParameterValidationError
+from .jobs import TaskJob
 from .outputs import TaskResult
 from .overrides import load_override
 from .resolution import ReferenceResolver
@@ -95,11 +103,13 @@ def _wire_names(spec: TaskResource) -> dict[str, str]:
     return names
 
 
-def _signature_from_schema(spec: TaskResource) -> inspect.Signature:
+def _signature_from_schema(spec: TaskResource, returns: type = TaskResult) -> inspect.Signature:
     """Synthesise a keyword-only ``run(...)`` signature from a task's parameter schema.
 
     Required parameters come first, then optional ones (defaulting to their schema
     default or ``None``), then the engine's own ``preview`` flag.
+
+    :param returns: ``TaskResult`` for execution or ``TaskJob`` for submission.
     """
     schema = spec.parameters or {}
     properties: dict[str, Any] = schema.get("properties", {})
@@ -134,7 +144,7 @@ def _signature_from_schema(spec: TaskResource) -> inspect.Signature:
     )
     if properties and not names:
         parameters.append(inspect.Parameter("parameters", inspect.Parameter.VAR_KEYWORD, annotation=Any))
-    return inspect.Signature(parameters, return_annotation=TaskResult)
+    return inspect.Signature(parameters, return_annotation=returns)
 
 
 class ComputeClient:
@@ -158,6 +168,9 @@ class ComputeClient:
         while this loads each referenced object's metadata. Pass ``False`` to keep
         validation but skip the requests, or ``True`` alongside ``validate=False`` to keep
         the guard that catches an object the task cannot read.
+    :param fb: Feedback used while waiting for any job submitted by this client.
+        Set it here so engine options do not occupy task parameter names in the namespace.
+        ``TaskJob.results`` can override it for one wait.
     """
 
     def __init__(
@@ -168,6 +181,7 @@ class ComputeClient:
         validate: bool = True,
         deep_validation: bool = False,
         check_schemas: bool | None = None,
+        fb: IFeedback = NoFeedback,
     ) -> None:
         self._context = context
         self._org_id: UUID = context.get_org_id()
@@ -177,6 +191,7 @@ class ComputeClient:
         self._validate = validate
         self._deep_validation = deep_validation
         self._check_schemas = check_schemas
+        self._fb = fb
 
     @property
     def context(self) -> IContext:
@@ -221,7 +236,7 @@ class ComputeClient:
         deep_validation: bool | None = None,
         check_schemas: bool | None = None,
     ) -> TaskResult:
-        """Discover the task (cached), resolve and validate the parameters, submit, and hydrate the results.
+        """Submit through the shared preparation path and wait for hydrated results.
 
         :param validate: Override the client's schema-validation setting for this call.
             ``False`` skips deep validation too, but never the signature binding that
@@ -231,6 +246,54 @@ class ComputeClient:
         :param check_schemas: Override the client's supported-schema setting for this call.
             Falls back to ``validate`` when neither is set.
         """
+        job = await self._submit(
+            topic,
+            task,
+            parameters,
+            "run",
+            validate=validate,
+            deep_validation=deep_validation,
+            check_schemas=check_schemas,
+        )
+        return await job.results()
+
+    async def asubmit(
+        self,
+        topic: str,
+        task: str,
+        parameters: dict[str, Any],
+        *,
+        validate: bool | None = None,
+        deep_validation: bool | None = None,
+        check_schemas: bool | None = None,
+    ) -> TaskJob[TaskResult]:
+        """Discover, resolve, validate and submit without waiting for completion.
+
+        Validation options have the same meaning as on ``arun``. The accepted job carries
+        its result schema, context and client feedback for the caller's eventual wait.
+        """
+        return await self._submit(
+            topic,
+            task,
+            parameters,
+            "submit",
+            validate=validate,
+            deep_validation=deep_validation,
+            check_schemas=check_schemas,
+        )
+
+    async def _submit(
+        self,
+        topic: str,
+        task: str,
+        parameters: dict[str, Any],
+        operation: str,
+        *,
+        validate: bool | None,
+        deep_validation: bool | None,
+        check_schemas: bool | None,
+    ) -> TaskJob[TaskResult]:
+        """Prepare and submit once; preserve the operation name in binding errors."""
         spec = await self._resolve_spec(topic, task)
         label = f"{topic}.{_normalise(task)}"
         signature = _signature_from_schema(spec)
@@ -247,7 +310,7 @@ class ComputeClient:
                 **{name: value for name, value in parameters.items() if name not in extra_parameters}
             )
         except TypeError as error:
-            raise ParameterValidationError(f"{label}.run(): {error}", task=label, errors=[str(error)]) from None
+            raise ParameterValidationError(f"{label}.{operation}(): {error}", task=label, errors=[str(error)]) from None
 
         # Forward only what the caller actually passed, so unset optionals fall back to the
         # platform's own defaults while an explicit ``None`` still reaches the wire.
@@ -286,7 +349,7 @@ class ComputeClient:
             result_type=dict,
             preview=preview,
         )
-        return TaskResult(await job.wait_for_results(), spec.results, self._context)
+        return TaskJob(job, spec.results, self._context, self._fb)
 
     async def _resolve_spec(self, topic: str, task: str) -> TaskResource:
         """Return the discovery spec for ``topic``/``task``.
@@ -339,16 +402,17 @@ class _TopicProxy:
 
 
 class _TaskProxy:
-    """A single task; exposes a schema-shaped async ``run(...)``."""
+    """A single task; exposes schema-shaped async ``run(...)`` and ``submit(...)``."""
 
     def __init__(self, client: ComputeClient, topic: str, task: str) -> None:
         self._client = client
         self._topic = topic
         self._task = task
         self.run = _make_run(client, topic, task)
+        self.submit = _make_submit(client, topic, task)
 
     def __dir__(self) -> list[str]:
-        return sorted(set(super().__dir__()) | {"run"})
+        return sorted(set(super().__dir__()) | {"run", "submit"})
 
     def __repr__(self) -> str:
         return f"<compute task {self._topic!r}.{_normalise(self._task)!r}>"
@@ -377,8 +441,23 @@ def _make_run(client: ComputeClient, topic: str, task: str):
     return run
 
 
-def _describe_from_schema(run: Any, client: ComputeClient, topic: str, task: str) -> None:
+def _make_submit(client: ComputeClient, topic: str, task: str):
+    """Build the async submit callable without discovery on attribute access."""
+
+    async def submit(**parameters: Any) -> TaskJob[TaskResult]:
+        try:
+            return await client.asubmit(topic, task, parameters)
+        finally:
+            _describe_from_schema(submit, client, topic, task, TaskJob)
+
+    submit.__name__ = "submit"
+    submit.__qualname__ = f"{_normalise(task)}.submit"
+    _describe_from_schema(submit, client, topic, task, TaskJob)
+    return submit
+
+
+def _describe_from_schema(run: Any, client: ComputeClient, topic: str, task: str, returns: type = TaskResult) -> None:
     """Shape ``run``'s signature and docstring from the task schema, if it has been discovered."""
     if (spec := client._peek_spec(topic, task)) is not None:
-        run.__signature__ = _signature_from_schema(spec)
+        run.__signature__ = _signature_from_schema(spec, returns)
         run.__doc__ = spec.description or run.__doc__

@@ -56,7 +56,7 @@ class FakeContext:
         return None
 
 
-class TestComputeClient(TestWithConnector):
+class ComputeClientTestCase(TestWithConnector):
     def setUp(self) -> None:
         super().setUp()
         self.context = FakeContext(self.connector, TEST_ORG.id)
@@ -83,6 +83,8 @@ class TestComputeClient(TestWithConnector):
             mock_job_client.submit = submit
             yield submit
 
+
+class TestComputeClient(ComputeClientTestCase):
     # -- namespace / discovery timing -------------------------------------- #
 
     def test_attribute_access_does_not_trigger_discovery(self) -> None:

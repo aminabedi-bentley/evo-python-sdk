@@ -16,16 +16,18 @@
 #
 # The runtime is always live, so tasks published after the snapshot still run --
 # they are simply not statically known until the snapshot is refreshed. Use
-# `ComputeClient.arun(topic, task, parameters)` to reach them.
+# `ComputeClient.arun(topic, task, parameters)` or `asubmit(...)` to reach them.
 
 from typing import Any, Literal, Protocol
 from uuid import UUID
 
 from evo.common import IContext
+from evo.common.interfaces import IFeedback
 from evo.objects import ObjectMetadata, ObjectReference
 from evo.objects.typed import BaseObject, DownloadedObject
 from typing_extensions import NotRequired, TypedDict
 
+from .jobs import TaskJob
 from .outputs import ResultNode, TaskResult
 from .overrides.geostatistics.kriging import KrigingOverride as _GeostatisticsKriging
 from .tasks.common.search import SearchNeighborhood
@@ -4588,6 +4590,14 @@ class _ConverterDetectConverter:
     ) -> ConverterDetectConverterResult:
         """Accepts one or more file references, inspects each file's extension, and returns which converter task(s) and geoscience object schema(s) are available for importing each file."""
         ...
+    async def submit(
+        self,
+        *,
+        files: list[FileInput],
+        preview: bool = True,
+    ) -> TaskJob[ConverterDetectConverterResult]:
+        """Accepts one or more file references, inspects each file's extension, and returns which converter task(s) and geoscience object schema(s) are available for importing each file."""
+        ...
 
 class _ConverterDgnImport:
     """Import DGN files into Evo as line segments, with fallback to triangle mesh or pointset."""
@@ -4604,6 +4614,18 @@ class _ConverterDgnImport:
     ) -> ConverterDgnImportResult:
         """Import DGN files into Evo as line segments, with fallback to triangle mesh or pointset."""
         ...
+    async def submit(
+        self,
+        *,
+        file: FileInput,
+        target: ConverterDgnImportTarget,
+        epsg_code: int | None = ...,
+        include_fills: bool = ...,
+        include_text_anchors: bool = ...,
+        preview: bool = True,
+    ) -> TaskJob[ConverterDgnImportResult]:
+        """Import DGN files into Evo as line segments, with fallback to triangle mesh or pointset."""
+        ...
 
 class _ConverterErsImport:
     """Import ER Mapper Raster (.ers) files into Evo as Regular-2D geoscience objects."""
@@ -4616,6 +4638,16 @@ class _ConverterErsImport:
         target: ConverterErsImportTarget,
         preview: bool = True,
     ) -> ConverterErsImportResult:
+        """Import ER Mapper Raster (.ers) files into Evo as Regular-2D geoscience objects."""
+        ...
+    async def submit(
+        self,
+        *,
+        file: FileInput,
+        file_data: FileInput,
+        target: ConverterErsImportTarget,
+        preview: bool = True,
+    ) -> TaskJob[ConverterErsImportResult]:
         """Import ER Mapper Raster (.ers) files into Evo as Regular-2D geoscience objects."""
         ...
 
@@ -4632,6 +4664,16 @@ class _ConverterGeosoftGridImport:
     ) -> ConverterGeosoftGridImportResult:
         """Import Geosoft Grid (.grd/.grd.gi) files into Evo as Regular-2D geoscience objects."""
         ...
+    async def submit(
+        self,
+        *,
+        file: FileInput,
+        target: ConverterGeosoftGridImportTarget,
+        file_gi: FileInput | None = ...,
+        preview: bool = True,
+    ) -> TaskJob[ConverterGeosoftGridImportResult]:
+        """Import Geosoft Grid (.grd/.grd.gi) files into Evo as Regular-2D geoscience objects."""
+        ...
 
 class _ConverterGeosoftSurfaceImport:
     """Import Geosoft Surface (.geosoft_surface) files into Evo as GeologicalModelMeshes geoscience objects."""
@@ -4645,6 +4687,15 @@ class _ConverterGeosoftSurfaceImport:
     ) -> ConverterGeosoftSurfaceImportResult:
         """Import Geosoft Surface (.geosoft_surface) files into Evo as GeologicalModelMeshes geoscience objects."""
         ...
+    async def submit(
+        self,
+        *,
+        file: FileInput,
+        target: ConverterGeosoftSurfaceImportTarget,
+        preview: bool = True,
+    ) -> TaskJob[ConverterGeosoftSurfaceImportResult]:
+        """Import Geosoft Surface (.geosoft_surface) files into Evo as GeologicalModelMeshes geoscience objects."""
+        ...
 
 class _ConverterGeosoftVoxelImport:
     """Import Geosoft Voxel (.geosoft_voxel) files into Evo as either Regular-3D or Tensor-3D geoscience objects."""
@@ -4656,6 +4707,15 @@ class _ConverterGeosoftVoxelImport:
         target: ConverterGeosoftVoxelImportTarget,
         preview: bool = True,
     ) -> ConverterGeosoftVoxelImportResult:
+        """Import Geosoft Voxel (.geosoft_voxel) files into Evo as either Regular-3D or Tensor-3D geoscience objects."""
+        ...
+    async def submit(
+        self,
+        *,
+        file: FileInput,
+        target: ConverterGeosoftVoxelImportTarget,
+        preview: bool = True,
+    ) -> TaskJob[ConverterGeosoftVoxelImportResult]:
         """Import Geosoft Voxel (.geosoft_voxel) files into Evo as either Regular-3D or Tensor-3D geoscience objects."""
         ...
 
@@ -4674,6 +4734,18 @@ class _ConverterImageImport:
     ) -> ConverterImageImportResult:
         """Import image files into Evo as Regular-2D geoscience objects."""
         ...
+    async def submit(
+        self,
+        *,
+        file: FileInput,
+        target: ConverterImageImportTarget,
+        cell_size: list[float] | None = ...,
+        coordinate_reference_system: str = ...,
+        origin: list[float] | None = ...,
+        preview: bool = True,
+    ) -> TaskJob[ConverterImageImportResult]:
+        """Import image files into Evo as Regular-2D geoscience objects."""
+        ...
 
 class _ConverterObjImport:
     """Import OBJ (Wavefront) files into Evo as Triangle Mesh geoscience objects. Supports triangles, quads (auto-triangulated), and multiple objects within a single file."""
@@ -4686,6 +4758,16 @@ class _ConverterObjImport:
         coordinate_reference_system: str | None = ...,
         preview: bool = True,
     ) -> ConverterObjImportResult:
+        """Import OBJ (Wavefront) files into Evo as Triangle Mesh geoscience objects. Supports triangles, quads (auto-triangulated), and multiple objects within a single file."""
+        ...
+    async def submit(
+        self,
+        *,
+        file: FileInput,
+        target: ConverterObjImportTarget,
+        coordinate_reference_system: str | None = ...,
+        preview: bool = True,
+    ) -> TaskJob[ConverterObjImportResult]:
         """Import OBJ (Wavefront) files into Evo as Triangle Mesh geoscience objects. Supports triangles, quads (auto-triangulated), and multiple objects within a single file."""
         ...
 
@@ -4708,6 +4790,22 @@ class _ConverterShpImport:
     ) -> ConverterShpImportResult:
         """Task to import SHP files into Evo as Triangle Mesh geoscience objects."""
         ...
+    async def submit(
+        self,
+        *,
+        file: FileInput,
+        file_shx: FileInput,
+        file_dbf: FileInput,
+        target: ConverterShpImportTarget,
+        file_cpg: FileInput | None = ...,
+        file_prj: FileInput | None = ...,
+        file_sbn: FileInput | None = ...,
+        file_sbx: FileInput | None = ...,
+        file_xml: FileInput | None = ...,
+        preview: bool = True,
+    ) -> TaskJob[ConverterShpImportResult]:
+        """Task to import SHP files into Evo as Triangle Mesh geoscience objects."""
+        ...
 
 class _ConverterUbcImport:
     """Task to import UBC Grids into Evo as Tensor-3D geoscience objects."""
@@ -4723,6 +4821,17 @@ class _ConverterUbcImport:
     ) -> ConverterUbcImportResult:
         """Task to import UBC Grids into Evo as Tensor-3D geoscience objects."""
         ...
+    async def submit(
+        self,
+        *,
+        file: FileInput,
+        file_mod: FileInput,
+        target: ConverterUbcImportTarget,
+        coordinate_reference_system: str = ...,
+        preview: bool = True,
+    ) -> TaskJob[ConverterUbcImportResult]:
+        """Task to import UBC Grids into Evo as Tensor-3D geoscience objects."""
+        ...
 
 class _ConverterVtkImport:
     """VTK Import compute task"""
@@ -4733,6 +4842,14 @@ class _ConverterVtkImport:
         files: list[FileInput],
         preview: bool = True,
     ) -> ConverterVtkImportResult:
+        """VTK Import compute task"""
+        ...
+    async def submit(
+        self,
+        *,
+        files: list[FileInput],
+        preview: bool = True,
+    ) -> TaskJob[ConverterVtkImportResult]:
         """VTK Import compute task"""
         ...
 
@@ -4752,6 +4869,19 @@ class _ConverterXyzImport:
     ) -> ConverterXyzImportResult:
         """Task to import XYZ files into Evo as Pointset geoscience objects."""
         ...
+    async def submit(
+        self,
+        *,
+        file: FileInput,
+        target: ConverterXyzImportTarget,
+        epsg_code: int | None = ...,
+        x_index: int | None = ...,
+        y_index: int | None = ...,
+        z_index: int | None = ...,
+        preview: bool = True,
+    ) -> TaskJob[ConverterXyzImportResult]:
+        """Task to import XYZ files into Evo as Pointset geoscience objects."""
+        ...
 
 class _CptToBoreholeCptReader:
     """CPT reader task"""
@@ -4763,6 +4893,15 @@ class _CptToBoreholeCptReader:
         target_downhole_collection: CptToBoreholeCptReaderTargetDownholeCollection,
         preview: bool = True,
     ) -> CptToBoreholeCptReaderResult:
+        """CPT reader task"""
+        ...
+    async def submit(
+        self,
+        *,
+        cpt_file: FileInput,
+        target_downhole_collection: CptToBoreholeCptReaderTargetDownholeCollection,
+        preview: bool = True,
+    ) -> TaskJob[CptToBoreholeCptReaderResult]:
         """CPT reader task"""
         ...
 
@@ -4781,6 +4920,18 @@ class _CptToBoreholeCreateClusters:
     ) -> CptToBoreholeCreateClustersResult:
         """Create clusters of related soil regions based on the stratification performed by the stratify task."""
         ...
+    async def submit(
+        self,
+        *,
+        downhole_collection: ObjectInput,
+        features_option: Literal["qtAndRf", "QtnAndFr"] = ...,
+        hole_ids: list[str] | None = ...,
+        number_of_clusters: int | None = ...,
+        uncluster: bool = ...,
+        preview: bool = True,
+    ) -> TaskJob[CptToBoreholeCreateClustersResult]:
+        """Create clusters of related soil regions based on the stratification performed by the stratify task."""
+        ...
 
 class _CptToBoreholePublish:
     """Publish a finalized downhole collection as a new geoscience object for downstream consumption."""
@@ -4795,6 +4946,18 @@ class _CptToBoreholePublish:
         exclude_collections: list[Literal["measured_cpt_readings", "derived_cpt_readings", "geology_layers"]] = ...,
         preview: bool = True,
     ) -> CptToBoreholePublishResult:
+        """Publish a finalized downhole collection as a new geoscience object for downstream consumption."""
+        ...
+    async def submit(
+        self,
+        *,
+        downhole_collection: ObjectInput,
+        target_downhole_collection: CptToBoreholePublishTargetDownholeCollection,
+        include_clusters: bool,
+        cluster_metadata: list[CptToBoreholePublishClusterMetadata] | None = ...,
+        exclude_collections: list[Literal["measured_cpt_readings", "derived_cpt_readings", "geology_layers"]] = ...,
+        preview: bool = True,
+    ) -> TaskJob[CptToBoreholePublishResult]:
         """Publish a finalized downhole collection as a new geoscience object for downstream consumption."""
         ...
 
@@ -4812,6 +4975,17 @@ class _CptToBoreholeStratify:
     ) -> CptToBoreholeStratifyResult:
         """Classifies and stratifies CPT data into geological layers based on predefined criteria and algorithms, facilitating geotechnical analysis and modeling."""
         ...
+    async def submit(
+        self,
+        *,
+        input_downhole_collections: list[ObjectInput],
+        target_downhole_collection: CptToBoreholeStratifyTargetDownholeCollection,
+        cpt_parameters: list[CptToBoreholeStratifyPerHoleParameters] | None = ...,
+        execution_mode: Literal["inline", "fan_out", "auto"] = ...,
+        preview: bool = True,
+    ) -> TaskJob[CptToBoreholeStratifyResult]:
+        """Classifies and stratifies CPT data into geological layers based on predefined criteria and algorithms, facilitating geotechnical analysis and modeling."""
+        ...
 
 class _DriverDriverGeneralCompute:
     """Driver general compute task"""
@@ -4823,6 +4997,15 @@ class _DriverDriverGeneralCompute:
         _backend_url: str = ...,
         preview: bool = True,
     ) -> DriverDriverGeneralComputeResult:
+        """Driver general compute task"""
+        ...
+    async def submit(
+        self,
+        *,
+        worker_message_body_json: str,
+        _backend_url: str = ...,
+        preview: bool = True,
+    ) -> TaskJob[DriverDriverGeneralComputeResult]:
         """Driver general compute task"""
         ...
 
@@ -4841,6 +5024,18 @@ class _GeophysicsGravityTerrainCorrection:
     ) -> GeophysicsGravityTerrainCorrectionResult:
         """Gravity terrain correction compute task for geophysical surveys"""
         ...
+    async def submit(
+        self,
+        *,
+        surfaces: ObjectInput,
+        observation_points: ObjectInput,
+        correction_radius: float,
+        terrain_layer: GeophysicsGravityTerrainCorrectionTerrainLayer,
+        water_layer: GeophysicsGravityTerrainCorrectionWaterLayer | None = ...,
+        preview: bool = True,
+    ) -> TaskJob[GeophysicsGravityTerrainCorrectionResult]:
+        """Gravity terrain correction compute task for geophysical surveys"""
+        ...
 
 class _GeophysicsRegular2dGridToTrimesh:
     """Convert a regular 2D grid to a triangle mesh using a cell-centered or vertex-centered scalar attribute as Z values. Supports optional NaN filtering."""
@@ -4853,6 +5048,16 @@ class _GeophysicsRegular2dGridToTrimesh:
         settings: GeophysicsRegular2dGridToTrimeshSettings = ...,
         preview: bool = True,
     ) -> GeophysicsRegular2dGridToTrimeshResult:
+        """Convert a regular 2D grid to a triangle mesh using a cell-centered or vertex-centered scalar attribute as Z values. Supports optional NaN filtering."""
+        ...
+    async def submit(
+        self,
+        *,
+        source: GeophysicsRegular2dGridToTrimeshSourceInput | AnyTypedAttribute,
+        target: GeophysicsRegular2dGridToTrimeshTarget,
+        settings: GeophysicsRegular2dGridToTrimeshSettings = ...,
+        preview: bool = True,
+    ) -> TaskJob[GeophysicsRegular2dGridToTrimeshResult]:
         """Convert a regular 2D grid to a triangle mesh using a cell-centered or vertex-centered scalar attribute as Z values. Supports optional NaN filtering."""
         ...
 
@@ -4868,6 +5073,17 @@ class _GeostatisticsBreakTies:
         seed: int = ...,
         preview: bool = True,
     ) -> GeostatisticsBreakTiesResult:
+        """For more information, please read the <a href='/docs/guides/geostatistics-tasks/tasks/break-ties'>guide</a>"""
+        ...
+    async def submit(
+        self,
+        *,
+        source: GeostatisticsBreakTiesSource | AnyTypedAttribute,
+        target: GeostatisticsBreakTiesTarget | AnyTypedAttribute,
+        neighborhood: GeostatisticsBreakTiesBreakTiesSearch | SearchNeighborhood,
+        seed: int = ...,
+        preview: bool = True,
+    ) -> TaskJob[GeostatisticsBreakTiesResult]:
         """For more information, please read the <a href='/docs/guides/geostatistics-tasks/tasks/break-ties'>guide</a>"""
         ...
 
@@ -4892,6 +5108,26 @@ class _GeostatisticsConditionalTurningBands:
         source_filter: GeostatisticsConditionalTurningBandsSourceFilter | None = ...,
         preview: bool = True,
     ) -> GeostatisticsConditionalTurningBandsResult:
+        """Runs the turning band simulator using an existing continuous distribution. For more information, please read the <a href='/docs/guides/geostatistics-tasks/tasks/conditional-turning-bands'>guide</a>"""
+        ...
+    async def submit(
+        self,
+        *,
+        source: ObjectInput,
+        source_attribute: AttributeInput,
+        target: ObjectInput,
+        neighborhood: GeostatisticsConditionalTurningBandsNeighborhood | SearchNeighborhood,
+        distribution: ObjectInput,
+        variogram_model: ObjectInput,
+        block_discretization: GeostatisticsConditionalTurningBandsBlockDiscretization,
+        filter: GeostatisticsConditionalTurningBandsFilter | None = ...,
+        kriging_method: Literal["simple", "ordinary"] = ...,
+        number_of_lines: int = ...,
+        random_seed: int = ...,
+        realizations: int = ...,
+        source_filter: GeostatisticsConditionalTurningBandsSourceFilter | None = ...,
+        preview: bool = True,
+    ) -> TaskJob[GeostatisticsConditionalTurningBandsResult]:
         """Runs the turning band simulator using an existing continuous distribution. For more information, please read the <a href='/docs/guides/geostatistics-tasks/tasks/conditional-turning-bands'>guide</a>"""
         ...
 
@@ -4926,6 +5162,34 @@ class _GeostatisticsConsim:
     ) -> GeostatisticsConsimResult:
         """For more information, please read the <a href='/docs/guides/geostatistics-tasks/tasks/conditional-simulation-workflow'>guide</a>"""
         ...
+    async def submit(
+        self,
+        *,
+        source_object: ObjectInput,
+        source_attribute: AttributeInput,
+        target_object: ObjectInput,
+        neighborhood: GeostatisticsConsimNeighborhood | SearchNeighborhood,
+        variogram_model: ObjectInput,
+        block_discretization: GeostatisticsConsimBlockDiscretization,
+        distribution: GeostatisticsConsimContinuousDistributionParameters | None = ...,
+        filter: GeostatisticsConsimFilter | None = ...,
+        kriging_method: Literal["simple", "ordinary"] = ...,
+        location_wise_quantiles: list[float] = ...,
+        loss_calculation: GeostatisticsConsimLossCalculation | None = ...,
+        mean_above_cutoff: list[float] | None = ...,
+        number_of_lines: int = ...,
+        number_of_simulations: int = ...,
+        number_of_simulations_to_save: int = ...,
+        perform_validation: bool = ...,
+        probability_above_cutoff: list[float] | None = ...,
+        random_seed: int = ...,
+        report_context: GeostatisticsConsimReportContext | None = ...,
+        report_mean_thresholds: GeostatisticsConsimReportMeanThresholds | None = ...,
+        source_filter: GeostatisticsConsimSourceFilter | None = ...,
+        preview: bool = False,
+    ) -> TaskJob[GeostatisticsConsimResult]:
+        """For more information, please read the <a href='/docs/guides/geostatistics-tasks/tasks/conditional-simulation-workflow'>guide</a>"""
+        ...
 
 class _GeostatisticsContinuousDistribution:
     """For more information, please read the <a href='/docs/guides/geostatistics-tasks/tasks/continuous-distribution'>guide</a>"""
@@ -4939,6 +5203,17 @@ class _GeostatisticsContinuousDistribution:
         weights: GeostatisticsContinuousDistributionWeights | None | AnyTypedAttribute = ...,
         preview: bool = True,
     ) -> GeostatisticsContinuousDistributionResult:
+        """For more information, please read the <a href='/docs/guides/geostatistics-tasks/tasks/continuous-distribution'>guide</a>"""
+        ...
+    async def submit(
+        self,
+        *,
+        source: GeostatisticsContinuousDistributionSource | AnyTypedAttribute,
+        target: GeostatisticsContinuousDistributionTarget,
+        tail_extrapolation: GeostatisticsContinuousDistributionTailExtrapolation | None = ...,
+        weights: GeostatisticsContinuousDistributionWeights | None | AnyTypedAttribute = ...,
+        preview: bool = True,
+    ) -> TaskJob[GeostatisticsContinuousDistributionResult]:
         """For more information, please read the <a href='/docs/guides/geostatistics-tasks/tasks/continuous-distribution'>guide</a>"""
         ...
 
@@ -4955,6 +5230,18 @@ class _GeostatisticsDeclustering:
         power: float | None = ...,
         preview: bool = True,
     ) -> GeostatisticsDeclusteringResult:
+        """Computes grid-based declustering weights by measuring each sample's influence on evaluation locations. Supports both KNN (arithmetic mean) and IDW (inverse-distance weighted) modes via an optional power parameter."""
+        ...
+    async def submit(
+        self,
+        *,
+        source: GeostatisticsDeclusteringSource | ObjectInput,
+        grid: GeostatisticsDeclusteringGrid | ObjectInput,
+        target: GeostatisticsDeclusteringTarget | AnyTypedAttribute,
+        neighborhood: GeostatisticsDeclusteringExtendedNeighborhood | SearchNeighborhood,
+        power: float | None = ...,
+        preview: bool = True,
+    ) -> TaskJob[GeostatisticsDeclusteringResult]:
         """Computes grid-based declustering weights by measuring each sample's influence on evaluation locations. Supports both KNN (arithmetic mean) and IDW (inverse-distance weighted) modes via an optional power parameter."""
         ...
 
@@ -4975,6 +5262,20 @@ class _GeostatisticsExperimentalVariogram:
     ) -> GeostatisticsExperimentalVariogramResult:
         """Computes one or more experimental (sample) variograms from a points or downhole intervals source object and writes them to a new experimental variogram object. A single call can mix omnidirectional, directional (azimuth/dip tolerance cone with optional bandwidth/bandheight) and downhole variograms, each with its own lag definition."""
         ...
+    async def submit(
+        self,
+        *,
+        source: GeostatisticsExperimentalVariogramSource | AnyTypedAttribute,
+        directions: list[
+            GeostatisticsExperimentalVariogramOmnidirectionalVariogram
+            | GeostatisticsExperimentalVariogramDirectionalVariogram
+            | GeostatisticsExperimentalVariogramDownholeVariogram
+        ],
+        target: GeostatisticsExperimentalVariogramTarget,
+        preview: bool = True,
+    ) -> TaskJob[GeostatisticsExperimentalVariogramResult]:
+        """Computes one or more experimental (sample) variograms from a points or downhole intervals source object and writes them to a new experimental variogram object. A single call can mix omnidirectional, directional (azimuth/dip tolerance cone with optional bandwidth/bandheight) and downhole variograms, each with its own lag definition."""
+        ...
 
 class _GeostatisticsIdw:
     """Inverse distance weighting estimation using weighted average of nearby sample values, where weights are inversely proportional to distance raised to a specified power."""
@@ -4990,6 +5291,17 @@ class _GeostatisticsIdw:
     ) -> GeostatisticsIdwResult:
         """Inverse distance weighting estimation using weighted average of nearby sample values, where weights are inversely proportional to distance raised to a specified power."""
         ...
+    async def submit(
+        self,
+        *,
+        source: GeostatisticsIdwSource | AnyTypedAttribute,
+        target: GeostatisticsIdwTarget | AnyTypedAttribute,
+        neighborhood: GeostatisticsIdwExtendedNeighborhood | SearchNeighborhood,
+        power: float,
+        preview: bool = True,
+    ) -> TaskJob[GeostatisticsIdwResult]:
+        """Inverse distance weighting estimation using weighted average of nearby sample values, where weights are inversely proportional to distance raised to a specified power."""
+        ...
 
 class _GeostatisticsKnn:
     """Nearest neighbor estimation using arithmetic mean of nearby sample values."""
@@ -5002,6 +5314,16 @@ class _GeostatisticsKnn:
         neighborhood: GeostatisticsKnnExtendedNeighborhood | SearchNeighborhood,
         preview: bool = True,
     ) -> GeostatisticsKnnResult:
+        """Nearest neighbor estimation using arithmetic mean of nearby sample values."""
+        ...
+    async def submit(
+        self,
+        *,
+        source: GeostatisticsKnnSource | AnyTypedAttribute,
+        target: GeostatisticsKnnTarget | AnyTypedAttribute,
+        neighborhood: GeostatisticsKnnExtendedNeighborhood | SearchNeighborhood,
+        preview: bool = True,
+    ) -> TaskJob[GeostatisticsKnnResult]:
         """Nearest neighbor estimation using arithmetic mean of nearby sample values."""
         ...
 
@@ -5019,6 +5341,19 @@ class _GeostatisticsLocationWise:
         summary: bool | None = ...,
         preview: bool = True,
     ) -> GeostatisticsLocationWiseResult:
+        """For more information, please read the <a href='/docs/guides/geostatistics-tasks/tasks/location-wise'>guide</a>"""
+        ...
+    async def submit(
+        self,
+        *,
+        source: GeostatisticsLocationWiseSource | AnyTypedAttribute,
+        target: GeostatisticsLocationWiseTarget | ObjectInput,
+        mean_above_cutoff: GeostatisticsLocationWiseMeanAboveCutoff | None = ...,
+        probability_above_cutoff: GeostatisticsLocationWiseProbabilityAboveCutoff | None = ...,
+        quantiles: list[float] | None = ...,
+        summary: bool | None = ...,
+        preview: bool = True,
+    ) -> TaskJob[GeostatisticsLocationWiseResult]:
         """For more information, please read the <a href='/docs/guides/geostatistics-tasks/tasks/location-wise'>guide</a>"""
         ...
 
@@ -5039,6 +5374,20 @@ class _GeostatisticsLossCalculation:
     ) -> GeostatisticsLossCalculationResult:
         """Calculate loss given block model and economic parameters"""
         ...
+    async def submit(
+        self,
+        *,
+        source: GeostatisticsLossCalculationSource | AnyTypedAttribute,
+        target: GeostatisticsLossCalculationTarget | AnyTypedAttribute,
+        material_categories: list[GeostatisticsLossCalculationMaterialCategories],
+        processing_cost: float,
+        mining_waste_cost: float,
+        mining_ore_cost: float,
+        metal_recovery_fraction: float,
+        preview: bool = True,
+    ) -> TaskJob[GeostatisticsLossCalculationResult]:
+        """Calculate loss given block model and economic parameters"""
+        ...
 
 class _GeostatisticsNormalScore:
     """For more information, please read the <a href='/docs/guides/geostatistics-tasks/tasks/normal-score'>guide</a>"""
@@ -5052,6 +5401,17 @@ class _GeostatisticsNormalScore:
         target: GeostatisticsNormalScoreTarget | AnyTypedAttribute,
         preview: bool = True,
     ) -> GeostatisticsNormalScoreResult:
+        """For more information, please read the <a href='/docs/guides/geostatistics-tasks/tasks/normal-score'>guide</a>"""
+        ...
+    async def submit(
+        self,
+        *,
+        method: Literal["forward", "backward"],
+        source: GeostatisticsNormalScoreSource | AnyTypedAttribute,
+        distribution: ObjectInput,
+        target: GeostatisticsNormalScoreTarget | AnyTypedAttribute,
+        preview: bool = True,
+    ) -> TaskJob[GeostatisticsNormalScoreResult]:
         """For more information, please read the <a href='/docs/guides/geostatistics-tasks/tasks/normal-score'>guide</a>"""
         ...
 
@@ -5070,6 +5430,20 @@ class _GeostatisticsProfitCalculation:
         metal_recovery_fraction: float,
         preview: bool = True,
     ) -> GeostatisticsProfitCalculationResult:
+        """Calculate profit given block model and economic parameters"""
+        ...
+    async def submit(
+        self,
+        *,
+        source: GeostatisticsProfitCalculationSource | AnyTypedAttribute,
+        target: GeostatisticsProfitCalculationTarget | AnyTypedAttribute,
+        material_categories: list[GeostatisticsProfitCalculationMaterialCategories],
+        processing_cost: float,
+        mining_waste_cost: float,
+        mining_ore_cost: float,
+        metal_recovery_fraction: float,
+        preview: bool = True,
+    ) -> TaskJob[GeostatisticsProfitCalculationResult]:
         """Calculate profit given block model and economic parameters"""
         ...
 
@@ -5101,6 +5475,31 @@ class _GeostatisticsSimulationReport:
     ) -> GeostatisticsSimulationReportResult:
         """For more information, please read the <a href='/docs/guides/geostatistics-tasks/tasks/simulation-report'>guide</a>"""
         ...
+    async def submit(
+        self,
+        *,
+        simulation_source: ObjectInput,
+        source_attribute: AttributeInput,
+        simulation_target: ObjectInput,
+        point_simulations: AttributeInput,
+        point_simulations_normal_score: AttributeInput,
+        block_simulations: AttributeInput,
+        block_simulations_normal_score: AttributeInput,
+        variogram_model: ObjectInput,
+        neighborhood: GeostatisticsSimulationReportNeighborhood | SearchNeighborhood,
+        block_discretization: GeostatisticsSimulationReportBlockDiscretization,
+        number_of_simulations: int,
+        distribution: GeostatisticsSimulationReportContinuousDistributionParameters | None = ...,
+        kriging_method: Literal["simple", "ordinary"] = ...,
+        material: GeostatisticsSimulationReportMaterial | None = ...,
+        number_of_lines: int = ...,
+        random_seed: int = ...,
+        report_context: GeostatisticsSimulationReportReportContext | None = ...,
+        report_mean_thresholds: GeostatisticsSimulationReportReportMeanThresholds | None = ...,
+        preview: bool = True,
+    ) -> TaskJob[GeostatisticsSimulationReportResult]:
+        """For more information, please read the <a href='/docs/guides/geostatistics-tasks/tasks/simulation-report'>guide</a>"""
+        ...
 
 class _GeotechAddToIntersectedGeometry:
     """Adds one or more triangle mesh objects to an existing intersected Geological Model Meshes object."""
@@ -5119,6 +5518,20 @@ class _GeotechAddToIntersectedGeometry:
     ) -> GeotechAddToIntersectedGeometryResult:
         """Adds one or more triangle mesh objects to an existing intersected Geological Model Meshes object."""
         ...
+    async def submit(
+        self,
+        *,
+        source: ObjectInput,
+        meshes_to_add: list[ObjectInput],
+        target: GeotechAddToIntersectedGeometryTarget,
+        tolerance: float,
+        max_point: GeotechAddToIntersectedGeometryPoint3D = ...,
+        min_point: GeotechAddToIntersectedGeometryPoint3D2 = ...,
+        rotation_angle: float = ...,
+        preview: bool = True,
+    ) -> TaskJob[GeotechAddToIntersectedGeometryResult]:
+        """Adds one or more triangle mesh objects to an existing intersected Geological Model Meshes object."""
+        ...
 
 class _GeotechCalculateMeshQualityHistogram:
     """Calculates a normalized inverse condition number histogram for triangles in a Triangle Mesh or Geological Model Meshes object."""
@@ -5130,6 +5543,15 @@ class _GeotechCalculateMeshQualityHistogram:
         bin_width: float = ...,
         preview: bool = True,
     ) -> GeotechCalculateMeshQualityHistogramResult:
+        """Calculates a normalized inverse condition number histogram for triangles in a Triangle Mesh or Geological Model Meshes object."""
+        ...
+    async def submit(
+        self,
+        *,
+        source: ObjectInput,
+        bin_width: float = ...,
+        preview: bool = True,
+    ) -> TaskJob[GeotechCalculateMeshQualityHistogramResult]:
         """Calculates a normalized inverse condition number histogram for triangles in a Triangle Mesh or Geological Model Meshes object."""
         ...
 
@@ -5144,6 +5566,14 @@ class _GeotechCheckTriangleOrientation:
     ) -> GeotechCheckTriangleOrientationResult:
         """Identifies triangles with inconsistent normal orientation relative to their neighbors in a Triangle Mesh or Geological Model Meshes object."""
         ...
+    async def submit(
+        self,
+        *,
+        source: ObjectInput,
+        preview: bool = True,
+    ) -> TaskJob[GeotechCheckTriangleOrientationResult]:
+        """Identifies triangles with inconsistent normal orientation relative to their neighbors in a Triangle Mesh or Geological Model Meshes object."""
+        ...
 
 class _GeotechCopyGeologicalModelMeshes:
     """Copies an existing set of geological model meshes, optionally removing external volumes from the result."""
@@ -5156,6 +5586,16 @@ class _GeotechCopyGeologicalModelMeshes:
         remove_external_volumes: bool = ...,
         preview: bool = True,
     ) -> GeotechCopyGeologicalModelMeshesResult:
+        """Copies an existing set of geological model meshes, optionally removing external volumes from the result."""
+        ...
+    async def submit(
+        self,
+        *,
+        source: ObjectInput,
+        target: GeotechCopyGeologicalModelMeshesTarget,
+        remove_external_volumes: bool = ...,
+        preview: bool = True,
+    ) -> TaskJob[GeotechCopyGeologicalModelMeshesResult]:
         """Copies an existing set of geological model meshes, optionally removing external volumes from the result."""
         ...
 
@@ -5173,6 +5613,17 @@ class _GeotechCreateCrossSection:
     ) -> GeotechCreateCrossSectionResult:
         """Intersects parametric volumes in a 3D Design Geometry with a vertical plane defined by a section origin and dip azimuth, producing a 2D Design Geometry with polyline boundaries."""
         ...
+    async def submit(
+        self,
+        *,
+        source: ObjectInput,
+        target: GeotechCreateCrossSectionTarget,
+        section_origin: GeotechCreateCrossSectionPoint3D,
+        section_dip_azimuth_degrees: float,
+        preview: bool = True,
+    ) -> TaskJob[GeotechCreateCrossSectionResult]:
+        """Intersects parametric volumes in a 3D Design Geometry with a vertical plane defined by a section origin and dip azimuth, producing a 2D Design Geometry with polyline boundaries."""
+        ...
 
 class _GeotechCreateGeologicalModelMeshes:
     """Decomposes an intersected mesh or existing GMM into per-volume geological model meshes, optionally removing the top (external) volume."""
@@ -5184,6 +5635,15 @@ class _GeotechCreateGeologicalModelMeshes:
         target: GeotechCreateGeologicalModelMeshesTarget,
         preview: bool = True,
     ) -> GeotechCreateGeologicalModelMeshesResult:
+        """Decomposes an intersected mesh or existing GMM into per-volume geological model meshes, optionally removing the top (external) volume."""
+        ...
+    async def submit(
+        self,
+        *,
+        source: ObjectInput,
+        target: GeotechCreateGeologicalModelMeshesTarget,
+        preview: bool = True,
+    ) -> TaskJob[GeotechCreateGeologicalModelMeshesResult]:
         """Decomposes an intersected mesh or existing GMM into per-volume geological model meshes, optionally removing the top (external) volume."""
         ...
 
@@ -5200,6 +5660,16 @@ class _GeotechDetectDegenerateTriangles:
     ) -> GeotechDetectDegenerateTrianglesResult:
         """Identifies needle and cap triangles in a Triangle Mesh or Geological Model Meshes object."""
         ...
+    async def submit(
+        self,
+        *,
+        source: ObjectInput,
+        cap_min_angle_degrees: float = ...,
+        needle_threshold_ratio: float = ...,
+        preview: bool = True,
+    ) -> TaskJob[GeotechDetectDegenerateTrianglesResult]:
+        """Identifies needle and cap triangles in a Triangle Mesh or Geological Model Meshes object."""
+        ...
 
 class _GeotechDetectDuplicatePoints:
     """Identifies exact duplicate vertices in a Triangle Mesh or Geological Model Meshes object."""
@@ -5212,6 +5682,14 @@ class _GeotechDetectDuplicatePoints:
     ) -> GeotechDetectDuplicatePointsResult:
         """Identifies exact duplicate vertices in a Triangle Mesh or Geological Model Meshes object."""
         ...
+    async def submit(
+        self,
+        *,
+        source: ObjectInput,
+        preview: bool = True,
+    ) -> TaskJob[GeotechDetectDuplicatePointsResult]:
+        """Identifies exact duplicate vertices in a Triangle Mesh or Geological Model Meshes object."""
+        ...
 
 class _GeotechDetectDuplicateTriangles:
     """Identifies duplicate triangles (same vertex indices regardless of order) in a Triangle Mesh or Geological Model Meshes object."""
@@ -5222,6 +5700,14 @@ class _GeotechDetectDuplicateTriangles:
         source: ObjectInput,
         preview: bool = True,
     ) -> GeotechDetectDuplicateTrianglesResult:
+        """Identifies duplicate triangles (same vertex indices regardless of order) in a Triangle Mesh or Geological Model Meshes object."""
+        ...
+    async def submit(
+        self,
+        *,
+        source: ObjectInput,
+        preview: bool = True,
+    ) -> TaskJob[GeotechDetectDuplicateTrianglesResult]:
         """Identifies duplicate triangles (same vertex indices regardless of order) in a Triangle Mesh or Geological Model Meshes object."""
         ...
 
@@ -5237,6 +5723,15 @@ class _GeotechDetectFins:
     ) -> GeotechDetectFinsResult:
         """Identifies fin-like connected components without closed boundaries in a Triangle Mesh or Geological Model Meshes object."""
         ...
+    async def submit(
+        self,
+        *,
+        source: ObjectInput,
+        max_area_ratio: float = ...,
+        preview: bool = True,
+    ) -> TaskJob[GeotechDetectFinsResult]:
+        """Identifies fin-like connected components without closed boundaries in a Triangle Mesh or Geological Model Meshes object."""
+        ...
 
 class _GeotechDetectHoles:
     """Identifies holes in a Triangle Mesh or Geological Model Meshes object based on boundary edge analysis."""
@@ -5248,6 +5743,15 @@ class _GeotechDetectHoles:
         hole_size_ratio_tolerance: float = ...,
         preview: bool = True,
     ) -> GeotechDetectHolesResult:
+        """Identifies holes in a Triangle Mesh or Geological Model Meshes object based on boundary edge analysis."""
+        ...
+    async def submit(
+        self,
+        *,
+        source: ObjectInput,
+        hole_size_ratio_tolerance: float = ...,
+        preview: bool = True,
+    ) -> TaskJob[GeotechDetectHolesResult]:
         """Identifies holes in a Triangle Mesh or Geological Model Meshes object based on boundary edge analysis."""
         ...
 
@@ -5262,6 +5766,14 @@ class _GeotechDetectNonManifoldEdges:
     ) -> GeotechDetectNonManifoldEdgesResult:
         """Identifies edges shared by more than two triangles in a Triangle Mesh or Geological Model Meshes object."""
         ...
+    async def submit(
+        self,
+        *,
+        source: ObjectInput,
+        preview: bool = True,
+    ) -> TaskJob[GeotechDetectNonManifoldEdgesResult]:
+        """Identifies edges shared by more than two triangles in a Triangle Mesh or Geological Model Meshes object."""
+        ...
 
 class _GeotechDetectNonManifoldVertices:
     """Identifies vertices with non-manifold topology in a Triangle Mesh or Geological Model Meshes object."""
@@ -5272,6 +5784,14 @@ class _GeotechDetectNonManifoldVertices:
         source: ObjectInput,
         preview: bool = True,
     ) -> GeotechDetectNonManifoldVerticesResult:
+        """Identifies vertices with non-manifold topology in a Triangle Mesh or Geological Model Meshes object."""
+        ...
+    async def submit(
+        self,
+        *,
+        source: ObjectInput,
+        preview: bool = True,
+    ) -> TaskJob[GeotechDetectNonManifoldVerticesResult]:
         """Identifies vertices with non-manifold topology in a Triangle Mesh or Geological Model Meshes object."""
         ...
 
@@ -5288,6 +5808,16 @@ class _GeotechDetectNonPartitioningSurfaces:
     ) -> GeotechDetectNonPartitioningSurfacesResult:
         """Identifies non-partitioning surfaces that are neither fins nor surfaces with holes in a Triangle Mesh or Geological Model Meshes object."""
         ...
+    async def submit(
+        self,
+        *,
+        source: ObjectInput,
+        hole_size_ratio_tolerance: float = ...,
+        max_area_ratio: float = ...,
+        preview: bool = True,
+    ) -> TaskJob[GeotechDetectNonPartitioningSurfacesResult]:
+        """Identifies non-partitioning surfaces that are neither fins nor surfaces with holes in a Triangle Mesh or Geological Model Meshes object."""
+        ...
 
 class _GeotechDetectSelfIntersections:
     """Identifies self-intersecting triangles in a Triangle Mesh or Geological Model Meshes object."""
@@ -5299,6 +5829,15 @@ class _GeotechDetectSelfIntersections:
         tolerance: float = ...,
         preview: bool = True,
     ) -> GeotechDetectSelfIntersectionsResult:
+        """Identifies self-intersecting triangles in a Triangle Mesh or Geological Model Meshes object."""
+        ...
+    async def submit(
+        self,
+        *,
+        source: ObjectInput,
+        tolerance: float = ...,
+        preview: bool = True,
+    ) -> TaskJob[GeotechDetectSelfIntersectionsResult]:
         """Identifies self-intersecting triangles in a Triangle Mesh or Geological Model Meshes object."""
         ...
 
@@ -5316,6 +5855,17 @@ class _GeotechFillHoles:
     ) -> GeotechFillHolesResult:
         """Fills holes in the triangle mesh of a GMM object using specified edge identifiers and a configurable fill mode strategy."""
         ...
+    async def submit(
+        self,
+        *,
+        source: ObjectInput,
+        target: GeotechFillHolesTarget,
+        edges: list[list[int]],
+        fill_mode_selection: Literal["Fill", "FillAndRefine", "FillRefineAndFair"],
+        preview: bool = True,
+    ) -> TaskJob[GeotechFillHolesResult]:
+        """Fills holes in the triangle mesh of a GMM object using specified edge identifiers and a configurable fill mode strategy."""
+        ...
 
 class _GeotechFixSelfIntersections:
     """Fixes self-intersections in the triangle mesh of a GMM object using configurable intersection detection settings."""
@@ -5328,6 +5878,16 @@ class _GeotechFixSelfIntersections:
         intersect_settings: GeotechFixSelfIntersectionsIntersectSettings,
         preview: bool = True,
     ) -> GeotechFixSelfIntersectionsResult:
+        """Fixes self-intersections in the triangle mesh of a GMM object using configurable intersection detection settings."""
+        ...
+    async def submit(
+        self,
+        *,
+        source: ObjectInput,
+        target: GeotechFixSelfIntersectionsTarget,
+        intersect_settings: GeotechFixSelfIntersectionsIntersectSettings,
+        preview: bool = True,
+    ) -> TaskJob[GeotechFixSelfIntersectionsResult]:
         """Fixes self-intersections in the triangle mesh of a GMM object using configurable intersection detection settings."""
         ...
 
@@ -5346,6 +5906,18 @@ class _GeotechInitAggregateGeomGmm:
     ) -> GeotechInitAggregateGeomGmmResult:
         """Creates a rotated bounding box as a Geological Model Meshes object, used as the initial intersected geometry when creating a model."""
         ...
+    async def submit(
+        self,
+        *,
+        target: GeotechInitAggregateGeomGmmTarget,
+        min_point: GeotechInitAggregateGeomGmmPoint3D,
+        max_point: GeotechInitAggregateGeomGmmPoint3D2,
+        coordinate_reference_system: str | None = ...,
+        rotation_angle: float = ...,
+        preview: bool = True,
+    ) -> TaskJob[GeotechInitAggregateGeomGmmResult]:
+        """Creates a rotated bounding box as a Geological Model Meshes object, used as the initial intersected geometry when creating a model."""
+        ...
 
 class _GeotechLocalRemesh:
     """Locally remeshes the region around selected seed triangles in a Geological Model Meshes object using configurable remeshing parameters and radius-based region growth."""
@@ -5360,6 +5932,18 @@ class _GeotechLocalRemesh:
         remesh_settings: GeotechLocalRemeshRemeshSettings = ...,
         preview: bool = True,
     ) -> GeotechLocalRemeshResult:
+        """Locally remeshes the region around selected seed triangles in a Geological Model Meshes object using configurable remeshing parameters and radius-based region growth."""
+        ...
+    async def submit(
+        self,
+        *,
+        source: ObjectInput,
+        target: GeotechLocalRemeshTarget,
+        seed_triangle_indices: list[int],
+        radius: float = ...,
+        remesh_settings: GeotechLocalRemeshRemeshSettings = ...,
+        preview: bool = True,
+    ) -> TaskJob[GeotechLocalRemeshResult]:
         """Locally remeshes the region around selected seed triangles in a Geological Model Meshes object using configurable remeshing parameters and radius-based region growth."""
         ...
 
@@ -5384,6 +5968,24 @@ class _GeotechMakeGmmIntoIntersectedGeometry:
     ) -> GeotechMakeGmmIntoIntersectedGeometryResult:
         """Clips a Geological Model Meshes object and processes it to create an intersected geometry mesh."""
         ...
+    async def submit(
+        self,
+        *,
+        source: ObjectInput,
+        target: GeotechMakeGmmIntoIntersectedGeometryTarget,
+        clip_tolerance: float,
+        attempt_auto_fix_on_failure: bool = ...,
+        attempt_conformalization: bool = ...,
+        collapse_settings: GeotechMakeGmmIntoIntersectedGeometryCollapseOverlapsSettings = ...,
+        intersection_tolerance_for_auto_fix: float = ...,
+        max_point: GeotechMakeGmmIntoIntersectedGeometryPoint3D = ...,
+        min_point: GeotechMakeGmmIntoIntersectedGeometryPoint3D2 = ...,
+        remesh_settings: GeotechMakeGmmIntoIntersectedGeometryRemeshSettings = ...,
+        rotation_angle: float = ...,
+        preview: bool = True,
+    ) -> TaskJob[GeotechMakeGmmIntoIntersectedGeometryResult]:
+        """Clips a Geological Model Meshes object and processes it to create an intersected geometry mesh."""
+        ...
 
 class _GeotechMakeIntoModelInput:
     """Clips a triangle mesh loosely to the specified bounds, merges duplicate points, and translates the result so it can be used as model input."""
@@ -5401,6 +6003,19 @@ class _GeotechMakeIntoModelInput:
     ) -> GeotechMakeIntoModelInputResult:
         """Clips a triangle mesh loosely to the specified bounds, merges duplicate points, and translates the result so it can be used as model input."""
         ...
+    async def submit(
+        self,
+        *,
+        source: ObjectInput,
+        target: GeotechMakeIntoModelInputTarget,
+        max_point: GeotechMakeIntoModelInputMaxPoint = ...,
+        min_point: GeotechMakeIntoModelInputMinPoint = ...,
+        rotation_angle: float = ...,
+        tolerance: float = ...,
+        preview: bool = True,
+    ) -> TaskJob[GeotechMakeIntoModelInputResult]:
+        """Clips a triangle mesh loosely to the specified bounds, merges duplicate points, and translates the result so it can be used as model input."""
+        ...
 
 class _GeotechMarkVolumesForRemoval:
     """Marks specified volumes in a Geological Model Meshes for removal by setting their material to external, or clears the marking."""
@@ -5413,6 +6028,16 @@ class _GeotechMarkVolumesForRemoval:
         settings: GeotechMarkVolumesForRemovalSettings,
         preview: bool = True,
     ) -> GeotechMarkVolumesForRemovalResult:
+        """Marks specified volumes in a Geological Model Meshes for removal by setting their material to external, or clears the marking."""
+        ...
+    async def submit(
+        self,
+        *,
+        source: ObjectInput,
+        target: GeotechMarkVolumesForRemovalTarget,
+        settings: GeotechMarkVolumesForRemovalSettings,
+        preview: bool = True,
+    ) -> TaskJob[GeotechMarkVolumesForRemovalResult]:
         """Marks specified volumes in a Geological Model Meshes for removal by setting their material to external, or clears the marking."""
         ...
 
@@ -5519,6 +6144,106 @@ class _GeotechParameterizeVolumes:
     ) -> GeotechParameterizeVolumesResult:
         """Parameterizes closed volumes from Triangle Mesh or Geological Model Meshes inputs and writes the result as a Design Geometry object."""
         ...
+    async def submit(
+        self,
+        *,
+        source: ObjectInput,
+        target: GeotechParameterizeVolumesTarget,
+        distance_unit: Literal[
+            "m",
+            "angstrom",
+            "chain",
+            "chain[BnA]",
+            "chain[BnB]",
+            "chain[Cla]",
+            "chain[Ind37]",
+            "chain[Se]",
+            "chain[SeT]",
+            "chain[US]",
+            "fathom",
+            "ft",
+            "ft[BnA]",
+            "ft[BnB]",
+            "ft[Br36]",
+            "ft[Br65]",
+            "ft[Cla]",
+            "ft[GC]",
+            "ft[Ind]",
+            "ft[Ind37]",
+            "ft[Ind62]",
+            "ft[Ind75]",
+            "ft[Se]",
+            "ft[SeT]",
+            "ft[US]",
+            "fur[US]",
+            "in",
+            "in[US]",
+            "link",
+            "link[BnA]",
+            "link[BnB]",
+            "link[Cla]",
+            "link[Se]",
+            "link[SeT]",
+            "link[US]",
+            "m[Ger]",
+            "mi",
+            "mi[naut]",
+            "mi[nautUK]",
+            "mi[US]",
+            "mil",
+            "rod[US]",
+            "yd",
+            "yd[BnA]",
+            "yd[BnB]",
+            "yd[Cla]",
+            "yd[Ind]",
+            "yd[Ind37]",
+            "yd[Ind62]",
+            "yd[Ind75]",
+            "yd[Se]",
+            "yd[SeT]",
+            "yd[US]",
+            "m3/m2",
+            "0.1 ft",
+            "0.1 ft[US]",
+            "0.1 in",
+            "0.1 yd",
+            "1/16 in",
+            "1/2 ft",
+            "1/32 in",
+            "1/64 in",
+            "10 ft",
+            "10 in",
+            "10 km",
+            "100 ft",
+            "100 km",
+            "1000 ft",
+            "30 ft",
+            "30 m",
+            "1E6 bbl/acre",
+            "bbl/acre",
+            "ft3/ft2",
+            "cm",
+            "dam",
+            "dm",
+            "Em",
+            "fm",
+            "Gm",
+            "hm",
+            "km",
+            "Mm",
+            "mm",
+            "nm",
+            "pm",
+            "Tm",
+            "um",
+        ],
+        include_hard_edges: bool = ...,
+        max_repair_iterations: int = ...,
+        preview: bool = True,
+    ) -> TaskJob[GeotechParameterizeVolumesResult]:
+        """Parameterizes closed volumes from Triangle Mesh or Geological Model Meshes inputs and writes the result as a Design Geometry object."""
+        ...
 
 class _GeotechRemesh:
     """Remeshes the full Geological Model Meshes object using configurable remeshing parameters to improve triangle quality while preserving the model structure."""
@@ -5543,6 +6268,26 @@ class _GeotechRemesh:
     ) -> GeotechRemeshResult:
         """Remeshes the full Geological Model Meshes object using configurable remeshing parameters to improve triangle quality while preserving the model structure."""
         ...
+    async def submit(
+        self,
+        *,
+        source: ObjectInput,
+        target: GeotechRemeshTarget,
+        initial_cleanup: bool = ...,
+        is_closed: bool = ...,
+        line_proximity_detection: bool = ...,
+        max_chordal_error: float = ...,
+        optimize: bool = ...,
+        patch_angle_tolerance: float = ...,
+        regularize_mode: bool = ...,
+        relax_chunk_interfaces: bool = ...,
+        shape_quality_weight: float = ...,
+        strain_tolerance: float = ...,
+        target_h: float = ...,
+        preview: bool = True,
+    ) -> TaskJob[GeotechRemeshResult]:
+        """Remeshes the full Geological Model Meshes object using configurable remeshing parameters to improve triangle quality while preserving the model structure."""
+        ...
 
 class _GeotechRemoveTriangles:
     """Removes the selected triangle indices from a Geological Model Meshes object and uploads the updated mesh as a new object."""
@@ -5555,6 +6300,16 @@ class _GeotechRemoveTriangles:
         triangle_indices: list[int],
         preview: bool = True,
     ) -> GeotechRemoveTrianglesResult:
+        """Removes the selected triangle indices from a Geological Model Meshes object and uploads the updated mesh as a new object."""
+        ...
+    async def submit(
+        self,
+        *,
+        source: ObjectInput,
+        target: GeotechRemoveTrianglesTarget,
+        triangle_indices: list[int],
+        preview: bool = True,
+    ) -> TaskJob[GeotechRemoveTrianglesResult]:
         """Removes the selected triangle indices from a Geological Model Meshes object and uploads the updated mesh as a new object."""
         ...
 
@@ -5574,6 +6329,19 @@ class _GeotechSubsumeEmbeddedVolumeInGmm:
     ) -> GeotechSubsumeEmbeddedVolumeInGmmResult:
         """Merges a specified source embedded volume into a target volume in a GMM, either by explicit index or by automatic selection strategy."""
         ...
+    async def submit(
+        self,
+        *,
+        source: ObjectInput,
+        target: GeotechSubsumeEmbeddedVolumeInGmmTarget,
+        subsume_source: int,
+        target_selection: GeotechSubsumeEmbeddedVolumeInGmmExplicitTargetSelection
+        | GeotechSubsumeEmbeddedVolumeInGmmLargestNeighbouringVolumeTargetSelection
+        | GeotechSubsumeEmbeddedVolumeInGmmLargestNeighbouringContactAreaTargetSelection,
+        preview: bool = True,
+    ) -> TaskJob[GeotechSubsumeEmbeddedVolumeInGmmResult]:
+        """Merges a specified source embedded volume into a target volume in a GMM, either by explicit index or by automatic selection strategy."""
+        ...
 
 class _GeotechValidateGmmAsIntersectedGeometry:
     """Checks whether a Geological Model Meshes object is valid as intersected geometry and returns human-readable descriptions of any issues found."""
@@ -5584,6 +6352,14 @@ class _GeotechValidateGmmAsIntersectedGeometry:
         source: ObjectInput,
         preview: bool = True,
     ) -> GeotechValidateGmmAsIntersectedGeometryResult:
+        """Checks whether a Geological Model Meshes object is valid as intersected geometry and returns human-readable descriptions of any issues found."""
+        ...
+    async def submit(
+        self,
+        *,
+        source: ObjectInput,
+        preview: bool = True,
+    ) -> TaskJob[GeotechValidateGmmAsIntersectedGeometryResult]:
         """Checks whether a Geological Model Meshes object is valid as intersected geometry and returns human-readable descriptions of any issues found."""
         ...
 
@@ -5606,6 +6382,22 @@ class _GtmAddToIntersectedGeometry:
     ) -> GtmAddToIntersectedGeometryResult:
         """[TODO: Add description] Performs Add To Intersected Geometry operation on geotechnical objects."""
         ...
+    async def submit(
+        self,
+        *,
+        gooseContext: GtmAddToIntersectedGeometryGooseContext,
+        action: Literal["add-to-intersected-geometry"],
+        inputObjects: list[ObjectInput],
+        intersectedGeomId: ObjectInput,
+        tolerance: float,
+        minPoint: GtmAddToIntersectedGeometryMinPoint,
+        maxPoint: GtmAddToIntersectedGeometryMaxPoint,
+        rotationAngle: float,
+        sessionId: str = ...,
+        preview: bool = False,
+    ) -> TaskJob[GtmAddToIntersectedGeometryResult]:
+        """[TODO: Add description] Performs Add To Intersected Geometry operation on geotechnical objects."""
+        ...
 
 class _GtmClip:
     """[TODO: Add description] Performs Clip operation on geotechnical objects."""
@@ -5622,6 +6414,20 @@ class _GtmClip:
         sessionId: str = ...,
         preview: bool = False,
     ) -> GtmClipResult:
+        """[TODO: Add description] Performs Clip operation on geotechnical objects."""
+        ...
+    async def submit(
+        self,
+        *,
+        gooseContext: GtmClipGooseContext,
+        action: Literal["clip"],
+        inputObjects: list[ObjectInput],
+        minPoint: GtmClipMinPoint,
+        maxPoint: GtmClipMaxPoint,
+        rotationAngle: float,
+        sessionId: str = ...,
+        preview: bool = False,
+    ) -> TaskJob[GtmClipResult]:
         """[TODO: Add description] Performs Clip operation on geotechnical objects."""
         ...
 
@@ -5642,6 +6448,20 @@ class _GtmCreateCrossSection:
     ) -> GtmCreateCrossSectionResult:
         """[TODO: Add description] Performs Create Cross Section operation on geotechnical objects."""
         ...
+    async def submit(
+        self,
+        *,
+        gooseContext: GtmCreateCrossSectionGooseContext,
+        action: Literal["create-cross-section"],
+        inputObjects: list[ObjectInput],
+        path: str,
+        sectionOrigin: GtmCreateCrossSectionSectionOrigin,
+        sectionDipAzimuthDegrees: float,
+        sessionId: str = ...,
+        preview: bool = False,
+    ) -> TaskJob[GtmCreateCrossSectionResult]:
+        """[TODO: Add description] Performs Create Cross Section operation on geotechnical objects."""
+        ...
 
 class _GtmCreateGeologicalModelMeshes:
     """[TODO: Add description] Performs Create Geological Model Meshes operation on geotechnical objects."""
@@ -5656,6 +6476,18 @@ class _GtmCreateGeologicalModelMeshes:
         sessionId: str = ...,
         preview: bool = False,
     ) -> GtmCreateGeologicalModelMeshesResult:
+        """[TODO: Add description] Performs Create Geological Model Meshes operation on geotechnical objects."""
+        ...
+    async def submit(
+        self,
+        *,
+        gooseContext: GtmCreateGeologicalModelMeshesGooseContext,
+        action: Literal["create-geological-model-meshes"],
+        inputObjects: list[ObjectInput],
+        path: str,
+        sessionId: str = ...,
+        preview: bool = False,
+    ) -> TaskJob[GtmCreateGeologicalModelMeshesResult]:
         """[TODO: Add description] Performs Create Geological Model Meshes operation on geotechnical objects."""
         ...
 
@@ -5675,6 +6507,19 @@ class _GtmDetectDegenerateTris:
     ) -> GtmDetectDegenerateTrisResult:
         """[TODO: Add description] Performs Detect Degenerate Tris operation on geotechnical objects."""
         ...
+    async def submit(
+        self,
+        *,
+        gooseContext: GtmDetectDegenerateTrisGooseContext,
+        action: Literal["detect-degenerate-tris"],
+        inputObjects: list[ObjectInput],
+        needleThresholdRatio: float,
+        capMinAngleDegrees: float,
+        sessionId: str = ...,
+        preview: bool = False,
+    ) -> TaskJob[GtmDetectDegenerateTrisResult]:
+        """[TODO: Add description] Performs Detect Degenerate Tris operation on geotechnical objects."""
+        ...
 
 class _GtmDetectDuplicatePoints:
     """[TODO: Add description] Performs Detect Duplicate Points operation on geotechnical objects."""
@@ -5690,6 +6535,17 @@ class _GtmDetectDuplicatePoints:
     ) -> GtmDetectDuplicatePointsResult:
         """[TODO: Add description] Performs Detect Duplicate Points operation on geotechnical objects."""
         ...
+    async def submit(
+        self,
+        *,
+        gooseContext: GtmDetectDuplicatePointsGooseContext,
+        action: Literal["detect-duplicate-points"],
+        inputObjects: list[ObjectInput],
+        sessionId: str = ...,
+        preview: bool = False,
+    ) -> TaskJob[GtmDetectDuplicatePointsResult]:
+        """[TODO: Add description] Performs Detect Duplicate Points operation on geotechnical objects."""
+        ...
 
 class _GtmDetectDuplicateTris:
     """[TODO: Add description] Performs Detect Duplicate Tris operation on geotechnical objects."""
@@ -5703,6 +6559,17 @@ class _GtmDetectDuplicateTris:
         sessionId: str = ...,
         preview: bool = False,
     ) -> GtmDetectDuplicateTrisResult:
+        """[TODO: Add description] Performs Detect Duplicate Tris operation on geotechnical objects."""
+        ...
+    async def submit(
+        self,
+        *,
+        gooseContext: GtmDetectDuplicateTrisGooseContext,
+        action: Literal["detect-duplicate-tris"],
+        inputObjects: list[ObjectInput],
+        sessionId: str = ...,
+        preview: bool = False,
+    ) -> TaskJob[GtmDetectDuplicateTrisResult]:
         """[TODO: Add description] Performs Detect Duplicate Tris operation on geotechnical objects."""
         ...
 
@@ -5721,6 +6588,18 @@ class _GtmDetectFins:
     ) -> GtmDetectFinsResult:
         """[TODO: Add description] Performs Detect Fins operation on geotechnical objects."""
         ...
+    async def submit(
+        self,
+        *,
+        gooseContext: GtmDetectFinsGooseContext,
+        action: Literal["detect-fins"],
+        inputObjects: list[ObjectInput],
+        maxAreaRatio: float = ...,
+        sessionId: str = ...,
+        preview: bool = False,
+    ) -> TaskJob[GtmDetectFinsResult]:
+        """[TODO: Add description] Performs Detect Fins operation on geotechnical objects."""
+        ...
 
 class _GtmDetectHoles:
     """[TODO: Add description] Performs Detect Holes operation on geotechnical objects."""
@@ -5735,6 +6614,18 @@ class _GtmDetectHoles:
         sessionId: str = ...,
         preview: bool = False,
     ) -> GtmDetectHolesResult:
+        """[TODO: Add description] Performs Detect Holes operation on geotechnical objects."""
+        ...
+    async def submit(
+        self,
+        *,
+        gooseContext: GtmDetectHolesGooseContext,
+        action: Literal["detect-holes"],
+        inputObjects: list[ObjectInput],
+        holeSizeRatioTolerance: float = ...,
+        sessionId: str = ...,
+        preview: bool = False,
+    ) -> TaskJob[GtmDetectHolesResult]:
         """[TODO: Add description] Performs Detect Holes operation on geotechnical objects."""
         ...
 
@@ -5752,6 +6643,17 @@ class _GtmDetectInconsistentlyOrientedTris:
     ) -> GtmDetectInconsistentlyOrientedTrisResult:
         """[TODO: Add description] Performs Detect Inconsistently Oriented Tris operation on geotechnical objects."""
         ...
+    async def submit(
+        self,
+        *,
+        gooseContext: GtmDetectInconsistentlyOrientedTrisGooseContext,
+        action: Literal["detect-inconsistently-oriented-tris"],
+        inputObjects: list[ObjectInput],
+        sessionId: str = ...,
+        preview: bool = False,
+    ) -> TaskJob[GtmDetectInconsistentlyOrientedTrisResult]:
+        """[TODO: Add description] Performs Detect Inconsistently Oriented Tris operation on geotechnical objects."""
+        ...
 
 class _GtmDetectNonManifoldEdges:
     """[TODO: Add description] Performs Detect Non Manifold Edges operation on geotechnical objects."""
@@ -5767,6 +6669,17 @@ class _GtmDetectNonManifoldEdges:
     ) -> GtmDetectNonManifoldEdgesResult:
         """[TODO: Add description] Performs Detect Non Manifold Edges operation on geotechnical objects."""
         ...
+    async def submit(
+        self,
+        *,
+        gooseContext: GtmDetectNonManifoldEdgesGooseContext,
+        action: Literal["detect-non-manifold-edges"],
+        inputObjects: list[ObjectInput],
+        sessionId: str = ...,
+        preview: bool = False,
+    ) -> TaskJob[GtmDetectNonManifoldEdgesResult]:
+        """[TODO: Add description] Performs Detect Non Manifold Edges operation on geotechnical objects."""
+        ...
 
 class _GtmDetectNonManifoldVertices:
     """[TODO: Add description] Performs Detect Non Manifold Vertices operation on geotechnical objects."""
@@ -5780,6 +6693,17 @@ class _GtmDetectNonManifoldVertices:
         sessionId: str = ...,
         preview: bool = False,
     ) -> GtmDetectNonManifoldVerticesResult:
+        """[TODO: Add description] Performs Detect Non Manifold Vertices operation on geotechnical objects."""
+        ...
+    async def submit(
+        self,
+        *,
+        gooseContext: GtmDetectNonManifoldVerticesGooseContext,
+        action: Literal["detect-non-manifold-vertices"],
+        inputObjects: list[ObjectInput],
+        sessionId: str = ...,
+        preview: bool = False,
+    ) -> TaskJob[GtmDetectNonManifoldVerticesResult]:
         """[TODO: Add description] Performs Detect Non Manifold Vertices operation on geotechnical objects."""
         ...
 
@@ -5799,6 +6723,19 @@ class _GtmDetectRedundantSurfaces:
     ) -> GtmDetectRedundantSurfacesResult:
         """[TODO: Add description] Performs Detect Redundant Surfaces operation on geotechnical objects."""
         ...
+    async def submit(
+        self,
+        *,
+        gooseContext: GtmDetectRedundantSurfacesGooseContext,
+        action: Literal["detect-redundant-surfaces"],
+        inputObjects: list[ObjectInput],
+        holeSizeRatioTolerance: float = ...,
+        maxAreaRatio: float = ...,
+        sessionId: str = ...,
+        preview: bool = False,
+    ) -> TaskJob[GtmDetectRedundantSurfacesResult]:
+        """[TODO: Add description] Performs Detect Redundant Surfaces operation on geotechnical objects."""
+        ...
 
 class _GtmDetectSelfIntersections:
     """[TODO: Add description] Performs Detect Self Intersections operation on geotechnical objects."""
@@ -5813,6 +6750,18 @@ class _GtmDetectSelfIntersections:
         sessionId: str = ...,
         preview: bool = False,
     ) -> GtmDetectSelfIntersectionsResult:
+        """[TODO: Add description] Performs Detect Self Intersections operation on geotechnical objects."""
+        ...
+    async def submit(
+        self,
+        *,
+        gooseContext: GtmDetectSelfIntersectionsGooseContext,
+        action: Literal["detect-self-intersections"],
+        inputObjects: list[ObjectInput],
+        tolerance: float,
+        sessionId: str = ...,
+        preview: bool = False,
+    ) -> TaskJob[GtmDetectSelfIntersectionsResult]:
         """[TODO: Add description] Performs Detect Self Intersections operation on geotechnical objects."""
         ...
 
@@ -5832,6 +6781,19 @@ class _GtmFillHoles:
     ) -> GtmFillHolesResult:
         """[TODO: Add description] Performs Fill Holes operation on geotechnical objects."""
         ...
+    async def submit(
+        self,
+        *,
+        gooseContext: GtmFillHolesGooseContext,
+        action: Literal["fill-holes"],
+        inputObjects: list[ObjectInput],
+        fillMode: Literal["Fill", "FillAndRefine", "FillRefineAndFair"],
+        edges: list[list[float]] = ...,
+        sessionId: str = ...,
+        preview: bool = False,
+    ) -> TaskJob[GtmFillHolesResult]:
+        """[TODO: Add description] Performs Fill Holes operation on geotechnical objects."""
+        ...
 
 class _GtmFixSelfIntersections:
     """[TODO: Add description] Performs Fix Self Intersections operation on geotechnical objects."""
@@ -5846,6 +6808,18 @@ class _GtmFixSelfIntersections:
         sessionId: str = ...,
         preview: bool = False,
     ) -> GtmFixSelfIntersectionsResult:
+        """[TODO: Add description] Performs Fix Self Intersections operation on geotechnical objects."""
+        ...
+    async def submit(
+        self,
+        *,
+        gooseContext: GtmFixSelfIntersectionsGooseContext,
+        action: Literal["fix-self-intersections"],
+        inputObjects: list[ObjectInput],
+        tolerance: float,
+        sessionId: str = ...,
+        preview: bool = False,
+    ) -> TaskJob[GtmFixSelfIntersectionsResult]:
         """[TODO: Add description] Performs Fix Self Intersections operation on geotechnical objects."""
         ...
 
@@ -5867,6 +6841,21 @@ class _GtmInitAggregateGeom:
     ) -> GtmInitAggregateGeomResult:
         """[TODO: Add description] Performs Init Aggregate Geom operation on geotechnical objects."""
         ...
+    async def submit(
+        self,
+        *,
+        gooseContext: GtmInitAggregateGeomGooseContext,
+        action: Literal["init-aggregate-geom"],
+        path: str,
+        minPoint: GtmInitAggregateGeomMinPoint,
+        maxPoint: GtmInitAggregateGeomMaxPoint,
+        rotationAngle: float,
+        outputGMM: bool = ...,
+        sessionId: str = ...,
+        preview: bool = False,
+    ) -> TaskJob[GtmInitAggregateGeomResult]:
+        """[TODO: Add description] Performs Init Aggregate Geom operation on geotechnical objects."""
+        ...
 
 class _GtmIntersect:
     """[TODO: Add description] Performs Intersect operation on geotechnical objects."""
@@ -5882,6 +6871,19 @@ class _GtmIntersect:
         sessionId: str = ...,
         preview: bool = False,
     ) -> GtmIntersectResult:
+        """[TODO: Add description] Performs Intersect operation on geotechnical objects."""
+        ...
+    async def submit(
+        self,
+        *,
+        gooseContext: GtmIntersectGooseContext,
+        action: Literal["intersect"],
+        inputObjects: list[ObjectInput],
+        tolerance: float,
+        assumeNoSelfIntersectionsInParts: bool,
+        sessionId: str = ...,
+        preview: bool = False,
+    ) -> TaskJob[GtmIntersectResult]:
         """[TODO: Add description] Performs Intersect operation on geotechnical objects."""
         ...
 
@@ -5911,6 +6913,29 @@ class _GtmLocalRemesh:
     ) -> GtmLocalRemeshResult:
         """[TODO: Add description] Performs Local Remesh operation on geotechnical objects."""
         ...
+    async def submit(
+        self,
+        *,
+        gooseContext: GtmLocalRemeshGooseContext,
+        action: Literal["local-remesh"],
+        inputObjects: list[ObjectInput],
+        patchAngleTolerance: float,
+        maxChordalError: float,
+        isClosed: bool,
+        initialCleanup: bool,
+        lineProximityDetection: bool,
+        optimize: bool,
+        shapeQualityWeight: float,
+        targetH: float,
+        regularizeMode: bool,
+        radius: float,
+        seedTriInds: list[int],
+        sessionId: str = ...,
+        strainTolerance: float = ...,
+        preview: bool = False,
+    ) -> TaskJob[GtmLocalRemeshResult]:
+        """[TODO: Add description] Performs Local Remesh operation on geotechnical objects."""
+        ...
 
 class _GtmMakeGmmIntoIntersectedGeometry:
     """Prepares a Geological Model Meshes object to be used as an Intersected Geometry. This involves removing all open surfaces, translating to origin, collapsing overlapping triangles into shared triangles, and clipping the geometry to the given bounds."""
@@ -5934,6 +6959,25 @@ class _GtmMakeGmmIntoIntersectedGeometry:
     ) -> GtmMakeGmmIntoIntersectedGeometryResult:
         """Prepares a Geological Model Meshes object to be used as an Intersected Geometry. This involves removing all open surfaces, translating to origin, collapsing overlapping triangles into shared triangles, and clipping the geometry to the given bounds."""
         ...
+    async def submit(
+        self,
+        *,
+        gooseContext: GtmMakeGmmIntoIntersectedGeometryGooseContext,
+        action: Literal["make-gmm-into-intersected-geometry"],
+        inputObjects: list[ObjectInput],
+        path: str,
+        minPoint: GtmMakeGmmIntoIntersectedGeometryMinPoint,
+        maxPoint: GtmMakeGmmIntoIntersectedGeometryMaxPoint,
+        rotationAngle: float,
+        attemptConformalization: bool = ...,
+        clipTolerance: float = ...,
+        collapseDistanceTolerance: float = ...,
+        collapseOverlapThreshold: float = ...,
+        sessionId: str = ...,
+        preview: bool = False,
+    ) -> TaskJob[GtmMakeGmmIntoIntersectedGeometryResult]:
+        """Prepares a Geological Model Meshes object to be used as an Intersected Geometry. This involves removing all open surfaces, translating to origin, collapsing overlapping triangles into shared triangles, and clipping the geometry to the given bounds."""
+        ...
 
 class _GtmMakeIntoModelInput:
     """[TODO: Add description] Performs Make Into Model Input operation on geotechnical objects."""
@@ -5954,6 +6998,22 @@ class _GtmMakeIntoModelInput:
     ) -> GtmMakeIntoModelInputResult:
         """[TODO: Add description] Performs Make Into Model Input operation on geotechnical objects."""
         ...
+    async def submit(
+        self,
+        *,
+        gooseContext: GtmMakeIntoModelInputGooseContext,
+        action: Literal["make-into-model-input"],
+        inputObjects: list[ObjectInput],
+        minPoint: GtmMakeIntoModelInputMinPoint,
+        maxPoint: GtmMakeIntoModelInputMaxPoint,
+        rotationAngle: float,
+        parentPath: str,
+        sessionId: str = ...,
+        tolerance: float = ...,
+        preview: bool = False,
+    ) -> TaskJob[GtmMakeIntoModelInputResult]:
+        """[TODO: Add description] Performs Make Into Model Input operation on geotechnical objects."""
+        ...
 
 class _GtmMergePoints:
     """[TODO: Add description] Performs Merge Points operation on geotechnical objects."""
@@ -5970,6 +7030,18 @@ class _GtmMergePoints:
     ) -> GtmMergePointsResult:
         """[TODO: Add description] Performs Merge Points operation on geotechnical objects."""
         ...
+    async def submit(
+        self,
+        *,
+        gooseContext: GtmMergePointsGooseContext,
+        action: Literal["merge-points"],
+        inputObjects: list[ObjectInput],
+        mergeDistance: float,
+        sessionId: str = ...,
+        preview: bool = False,
+    ) -> TaskJob[GtmMergePointsResult]:
+        """[TODO: Add description] Performs Merge Points operation on geotechnical objects."""
+        ...
 
 class _GtmOrientTris:
     """[TODO: Add description] Performs Orient Tris operation on geotechnical objects."""
@@ -5983,6 +7055,17 @@ class _GtmOrientTris:
         sessionId: str = ...,
         preview: bool = False,
     ) -> GtmOrientTrisResult:
+        """[TODO: Add description] Performs Orient Tris operation on geotechnical objects."""
+        ...
+    async def submit(
+        self,
+        *,
+        gooseContext: GtmOrientTrisGooseContext,
+        action: Literal["orient-tris"],
+        inputObjects: list[ObjectInput],
+        sessionId: str = ...,
+        preview: bool = False,
+    ) -> TaskJob[GtmOrientTrisResult]:
         """[TODO: Add description] Performs Orient Tris operation on geotechnical objects."""
         ...
 
@@ -6001,6 +7084,20 @@ class _GtmParameterizeVolumes:
         sessionId: str = ...,
         preview: bool = False,
     ) -> GtmParameterizeVolumesResult:
+        """[TODO: Add description] Performs Parameterize Volumes operation on geotechnical objects."""
+        ...
+    async def submit(
+        self,
+        *,
+        gooseContext: GtmParameterizeVolumesGooseContext,
+        action: Literal["parameterize-volumes"],
+        inputObjects: list[ObjectInput],
+        path: str,
+        distanceUnit: str,
+        includeHardEdges: bool = ...,
+        sessionId: str = ...,
+        preview: bool = False,
+    ) -> TaskJob[GtmParameterizeVolumesResult]:
         """[TODO: Add description] Performs Parameterize Volumes operation on geotechnical objects."""
         ...
 
@@ -6028,6 +7125,27 @@ class _GtmRemesh:
     ) -> GtmRemeshResult:
         """[TODO: Add description] Performs Remesh operation on geotechnical objects."""
         ...
+    async def submit(
+        self,
+        *,
+        gooseContext: GtmRemeshGooseContext,
+        action: Literal["remesh"],
+        inputObjects: list[ObjectInput],
+        patchAngleTolerance: float,
+        maxChordalError: float,
+        isClosed: bool,
+        initialCleanup: bool,
+        lineProximityDetection: bool,
+        optimize: bool,
+        shapeQualityWeight: float,
+        targetH: float,
+        regularizeMode: bool,
+        sessionId: str = ...,
+        strainTolerance: float = ...,
+        preview: bool = False,
+    ) -> TaskJob[GtmRemeshResult]:
+        """[TODO: Add description] Performs Remesh operation on geotechnical objects."""
+        ...
 
 class _GtmRemoveDegenerateTris:
     """[TODO: Add description] Performs Remove Degenerate Tris operation on geotechnical objects."""
@@ -6046,6 +7164,20 @@ class _GtmRemoveDegenerateTris:
     ) -> GtmRemoveDegenerateTrisResult:
         """[TODO: Add description] Performs Remove Degenerate Tris operation on geotechnical objects."""
         ...
+    async def submit(
+        self,
+        *,
+        gooseContext: GtmRemoveDegenerateTrisGooseContext,
+        action: Literal["remove-degenerate-tris"],
+        inputObjects: list[ObjectInput],
+        needleThresholdRatio: float,
+        needleCollapseLength: float,
+        capMinAngleDegrees: float,
+        sessionId: str = ...,
+        preview: bool = False,
+    ) -> TaskJob[GtmRemoveDegenerateTrisResult]:
+        """[TODO: Add description] Performs Remove Degenerate Tris operation on geotechnical objects."""
+        ...
 
 class _GtmRemoveTris:
     """[TODO: Add description] Performs Remove Tris operation on geotechnical objects."""
@@ -6062,6 +7194,18 @@ class _GtmRemoveTris:
     ) -> GtmRemoveTrisResult:
         """[TODO: Add description] Performs Remove Tris operation on geotechnical objects."""
         ...
+    async def submit(
+        self,
+        *,
+        gooseContext: GtmRemoveTrisGooseContext,
+        action: Literal["remove-tris"],
+        inputObjects: list[ObjectInput],
+        triInds: list[float],
+        sessionId: str = ...,
+        preview: bool = False,
+    ) -> TaskJob[GtmRemoveTrisResult]:
+        """[TODO: Add description] Performs Remove Tris operation on geotechnical objects."""
+        ...
 
 class _GtmRemoveUnusedPoints:
     """[TODO: Add description] Performs Remove Unused Points operation on geotechnical objects."""
@@ -6075,6 +7219,17 @@ class _GtmRemoveUnusedPoints:
         sessionId: str = ...,
         preview: bool = False,
     ) -> GtmRemoveUnusedPointsResult:
+        """[TODO: Add description] Performs Remove Unused Points operation on geotechnical objects."""
+        ...
+    async def submit(
+        self,
+        *,
+        gooseContext: GtmRemoveUnusedPointsGooseContext,
+        action: Literal["remove-unused-points"],
+        inputObjects: list[ObjectInput],
+        sessionId: str = ...,
+        preview: bool = False,
+    ) -> TaskJob[GtmRemoveUnusedPointsResult]:
         """[TODO: Add description] Performs Remove Unused Points operation on geotechnical objects."""
         ...
 
@@ -6093,6 +7248,18 @@ class _GtmRotate:
     ) -> GtmRotateResult:
         """[TODO: Add description] Performs Rotate operation on geotechnical objects."""
         ...
+    async def submit(
+        self,
+        *,
+        gooseContext: GtmRotateGooseContext,
+        action: Literal["rotate"],
+        inputObjects: list[ObjectInput],
+        angles: GtmRotateAngles,
+        sessionId: str = ...,
+        preview: bool = False,
+    ) -> TaskJob[GtmRotateResult]:
+        """[TODO: Add description] Performs Rotate operation on geotechnical objects."""
+        ...
 
 class _GtmSplitComponents:
     """[TODO: Add description] Performs Split Components operation on geotechnical objects."""
@@ -6108,6 +7275,19 @@ class _GtmSplitComponents:
         sessionId: str = ...,
         preview: bool = False,
     ) -> GtmSplitComponentsResult:
+        """[TODO: Add description] Performs Split Components operation on geotechnical objects."""
+        ...
+    async def submit(
+        self,
+        *,
+        gooseContext: GtmSplitComponentsGooseContext,
+        action: Literal["split-components"],
+        inputObjects: list[ObjectInput],
+        parentPath: str,
+        namePrefix: str,
+        sessionId: str = ...,
+        preview: bool = False,
+    ) -> TaskJob[GtmSplitComponentsResult]:
         """[TODO: Add description] Performs Split Components operation on geotechnical objects."""
         ...
 
@@ -6128,6 +7308,20 @@ class _GtmSubsumeEmbeddedVolumeInGmm:
     ) -> GtmSubsumeEmbeddedVolumeInGmmResult:
         """Subsume an embedded volume of a `geological-model-meshes` object into a neighbouring embedded volume."""
         ...
+    async def submit(
+        self,
+        *,
+        gooseContext: GtmSubsumeEmbeddedVolumeInGmmGooseContext,
+        action: Literal["subsume-embedded-volume-in-gmm"],
+        inputObjects: list[ObjectInput],
+        subsumeSource: int,
+        sessionId: str = ...,
+        subsumeTarget: GtmSubsumeEmbeddedVolumeInGmmSubsumeTargetSubsumeByIndex
+        | GtmSubsumeEmbeddedVolumeInGmmSubsumeTargetSubsumeAutomaticallyByStrategy = ...,
+        preview: bool = False,
+    ) -> TaskJob[GtmSubsumeEmbeddedVolumeInGmmResult]:
+        """Subsume an embedded volume of a `geological-model-meshes` object into a neighbouring embedded volume."""
+        ...
 
 class _GtmTranslate:
     """[TODO: Add description] Performs Translate operation on geotechnical objects."""
@@ -6142,6 +7336,18 @@ class _GtmTranslate:
         sessionId: str = ...,
         preview: bool = False,
     ) -> GtmTranslateResult:
+        """[TODO: Add description] Performs Translate operation on geotechnical objects."""
+        ...
+    async def submit(
+        self,
+        *,
+        gooseContext: GtmTranslateGooseContext,
+        action: Literal["translate"],
+        inputObjects: list[ObjectInput],
+        delta: GtmTranslateDelta,
+        sessionId: str = ...,
+        preview: bool = False,
+    ) -> TaskJob[GtmTranslateResult]:
         """[TODO: Add description] Performs Translate operation on geotechnical objects."""
         ...
 
@@ -6160,6 +7366,18 @@ class _GtmUploadMeshData:
     ) -> GtmUploadMeshDataResult:
         """[TODO: Add description] Performs Upload Mesh Data operation on geotechnical objects."""
         ...
+    async def submit(
+        self,
+        *,
+        gooseContext: GtmUploadMeshDataGooseContext,
+        action: Literal["upload-mesh-data"],
+        fileId: str,
+        path: str,
+        sessionId: str = ...,
+        preview: bool = False,
+    ) -> TaskJob[GtmUploadMeshDataResult]:
+        """[TODO: Add description] Performs Upload Mesh Data operation on geotechnical objects."""
+        ...
 
 class _GtmValidateGmmAsIntersectedGeometry:
     """Validates a Geological Model Meshes object to check if it is a valid representation of an intersected geometry. Returns a list of validation issues (errors). An empty list means the object is valid."""
@@ -6173,6 +7391,17 @@ class _GtmValidateGmmAsIntersectedGeometry:
         sessionId: str = ...,
         preview: bool = False,
     ) -> GtmValidateGmmAsIntersectedGeometryResult:
+        """Validates a Geological Model Meshes object to check if it is a valid representation of an intersected geometry. Returns a list of validation issues (errors). An empty list means the object is valid."""
+        ...
+    async def submit(
+        self,
+        *,
+        gooseContext: GtmValidateGmmAsIntersectedGeometryGooseContext,
+        action: Literal["validate-gmm-as-intersected-geometry"],
+        inputObjects: list[ObjectInput],
+        sessionId: str = ...,
+        preview: bool = False,
+    ) -> TaskJob[GtmValidateGmmAsIntersectedGeometryResult]:
         """Validates a Geological Model Meshes object to check if it is a valid representation of an intersected geometry. Returns a list of validation issues (errors). An empty list means the object is valid."""
         ...
 
@@ -6190,6 +7419,17 @@ class _IsosurfacingCategory:
     ) -> IsosurfacingCategoryResult:
         """Generate closed volume meshes or boundary surfaces from category attributes on 3D grids. Supports single-category extraction."""
         ...
+    async def submit(
+        self,
+        *,
+        source: IsosurfacingCategoryCategorySourceInput | AnyTypedAttribute,
+        category: str,
+        target: IsosurfacingCategoryTarget,
+        settings: IsosurfacingCategoryCategorySettings = ...,
+        preview: bool = True,
+    ) -> TaskJob[IsosurfacingCategoryResult]:
+        """Generate closed volume meshes or boundary surfaces from category attributes on 3D grids. Supports single-category extraction."""
+        ...
 
 class _IsosurfacingNumeric:
     """Generate an isosurface at a specified threshold value from numeric attributes on 3D grids. Supports regular, tensor, masked, block model, and unstructured hexahedral and tetrahedral grids."""
@@ -6203,6 +7443,17 @@ class _IsosurfacingNumeric:
         settings: IsosurfacingNumericNumericSettings = ...,
         preview: bool = True,
     ) -> IsosurfacingNumericResult:
+        """Generate an isosurface at a specified threshold value from numeric attributes on 3D grids. Supports regular, tensor, masked, block model, and unstructured hexahedral and tetrahedral grids."""
+        ...
+    async def submit(
+        self,
+        *,
+        source: IsosurfacingNumericNumericSourceInput | AnyTypedAttribute,
+        threshold: float,
+        target: IsosurfacingNumericTarget,
+        settings: IsosurfacingNumericNumericSettings = ...,
+        preview: bool = True,
+    ) -> TaskJob[IsosurfacingNumericResult]:
         """Generate an isosurface at a specified threshold value from numeric attributes on 3D grids. Supports regular, tensor, masked, block model, and unstructured hexahedral and tetrahedral grids."""
         ...
 
@@ -6219,6 +7470,18 @@ class _UtilitiesCompress:
         output_name: str = ...,
         preview: bool = True,
     ) -> UtilitiesCompressResult:
+        """Downloads a set of files referenced by File API URLs, bundles them into a single archive (ZIP or TAR with gzip/bzip2/xz compression), uploads the archive back to the File API, and returns a downloadable reference to it."""
+        ...
+    async def submit(
+        self,
+        *,
+        files: list[FileInput],
+        destination: FileInput,
+        archive_format: Literal["zip", "zip-stored", "tar", "tar.gz", "tar.bz2", "tar.xz"] = ...,
+        compression_level: int | None = ...,
+        output_name: str = ...,
+        preview: bool = True,
+    ) -> TaskJob[UtilitiesCompressResult]:
         """Downloads a set of files referenced by File API URLs, bundles them into a single archive (ZIP or TAR with gzip/bzip2/xz compression), uploads the archive back to the File API, and returns a downloadable reference to it."""
         ...
 
@@ -6242,11 +7505,29 @@ class _VisServiceTiling:
     ) -> VisServiceTilingResult:
         """Generates 3D Tiles from Geoscience Object Schema (GOS) objects for visualization"""
         ...
+    async def submit(
+        self,
+        *,
+        object_url: str,
+        request_id: str,
+        bearer_token: str,
+        crs: str,
+        s2s_user_info: str,
+        s2s_org_info: str,
+        gcp_bucket_name: str,
+        gcp_folder_prefix: str,
+        gcp_oauth_token: str,
+        gcp_oauth_token_expiry: str,
+        preview: bool = False,
+    ) -> TaskJob[VisServiceTilingResult]:
+        """Generates 3D Tiles from Geoscience Object Schema (GOS) objects for visualization"""
+        ...
 
 class _UnknownTask:
     """A task this stub does not describe. It still runs, with generic arguments."""
 
     async def run(self, **parameters: Any) -> TaskResult: ...
+    async def submit(self, **parameters: Any) -> TaskJob[TaskResult]: ...
 
 class _UnknownTopic:
     """A topic this stub does not describe. Its tasks still resolve at run time."""
@@ -6418,6 +7699,7 @@ class ComputeClient:
         validate: bool = ...,
         deep_validation: bool = ...,
         check_schemas: bool | None = ...,
+        fb: IFeedback = ...,
     ) -> None: ...
     @property
     def context(self) -> IContext: ...
@@ -6432,6 +7714,18 @@ class ComputeClient:
         check_schemas: bool | None = ...,
     ) -> TaskResult:
         """Run any task by name, including one this stub does not know about."""
+        ...
+    async def asubmit(
+        self,
+        topic: str,
+        task: str,
+        parameters: dict[str, Any],
+        *,
+        validate: bool | None = ...,
+        deep_validation: bool | None = ...,
+        check_schemas: bool | None = ...,
+    ) -> TaskJob[TaskResult]:
+        """Submit any task by name without waiting for its results."""
         ...
     def __dir__(self) -> list[str]: ...
     def __repr__(self) -> str: ...

@@ -15,13 +15,19 @@ Run ``pyright stubs/checks/usage_ok.py`` (or ``mypy``) from ``packages/evo-compu
 let ``tests/test_stubgen.py`` do it when the checker is installed.
 """
 
+from typing import TYPE_CHECKING
+from uuid import UUID
+
 from evo.common import IContext
 from evo.objects.typed import Attribute, BaseObject, PendingAttribute
 from typing_extensions import assert_type
 
-from evo.compute import ComputeClient
+from evo.compute import ComputeClient, JobProgress, TaskJob, TaskResult
 from evo.compute.tasks.common import Ellipsoid, EllipsoidRanges, Rotation, SearchNeighborhood
 from evo.compute.tasks.geostatistics.kriging import KrigingMethod, KrigingResult
+
+if TYPE_CHECKING:
+    from evo.compute.engine import GeostatisticsDeclusteringResult
 
 
 def _model_neighborhood() -> SearchNeighborhood:
@@ -51,6 +57,35 @@ async def neighborhood_objects_async(context: IContext) -> None:
         power=2.5,
     )
     await result.target.attribute.to_dataframe()
+
+
+async def submit_then_wait(context: IContext) -> None:
+    client = ComputeClient(context)
+    job = await client.geostatistics.declustering.submit(
+        source="https://example.com/objects/samples",
+        grid="https://example.com/objects/grid",
+        target={"object": "https://example.com/objects/target", "attribute": "weights"},
+        neighborhood=_model_neighborhood(),
+        power=2.5,
+    )
+    assert_type(job, TaskJob[GeostatisticsDeclusteringResult])
+    assert_type(job.id, UUID)
+    assert_type(job.url, str)
+    assert_type(await job.status(), JobProgress)
+    result = await job.results(polling_interval_seconds=0.0)
+    assert_type(result, GeostatisticsDeclusteringResult)
+    assert_type(result.target.attribute.name, str)
+    await result.target.attribute.to_dataframe()
+    await job.cancel()
+
+
+async def submit_unknown_tasks(context: IContext) -> None:
+    client = ComputeClient(context)
+    job = await client.geology.some_task.submit(anything=1)
+    assert_type(job, TaskJob[TaskResult])
+    assert_type(await job.results(), TaskResult)
+    generic = await client.asubmit("new-topic", "new-task", {"source": "..."})
+    assert_type(generic, TaskJob[TaskResult])
 
 
 async def declustering(context: IContext) -> None:
