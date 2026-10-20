@@ -12,6 +12,9 @@ stubs-compute:
 check-stubs-compute:
 	uv run --package evo-compute python -m evo.compute._stubgen generate --check
 
+check-types-compute:
+	uv run --package evo-compute --group test pytest packages/evo-compute/tests/test_stubgen.py::TestTypeCheckers -q
+
 test-common:
 	uv run --package evo-sdk-common pytest packages/evo-sdk-common/tests
 
