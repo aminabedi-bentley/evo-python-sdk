@@ -39,7 +39,7 @@ from evo.objects.typed.base import BaseObject
 from data import load_test_data
 from evo.compute import ComputeClient, ParameterValidationError, ReferenceResolver, TaskResource
 from evo.compute.tasks import Source, Target
-from evo.compute.tasks.geostatistics.kriging import BlockDiscretisation
+from evo.compute.tasks.geostatistics.kriging import BlockDiscretization
 
 HUB_URL = "https://unittest.localhost/"
 ORG_ID = UUID(int=1)
@@ -482,7 +482,7 @@ class TestNonReferenceValues(ResolutionTestCase):
         with self.objects_service():
             resolved = await self.resolve(
                 source={"object": POINTSET_URL, "attribute": "grade"},
-                discretisation=BlockDiscretisation(nx=3, ny=3, nz=2),
+                discretisation=BlockDiscretization(nx=3, ny=3, nz=2),
             )
         self.assertEqual({"nx": 3, "ny": 3, "nz": 2}, resolved["discretisation"])
 

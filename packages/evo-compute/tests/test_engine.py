@@ -120,6 +120,26 @@ class TestComputeClient(TestWithConnector):
             )
         self.assertEqual(1, self.transport.request.call_count)
 
+    async def test_hyphenated_topic_names_are_reachable_with_underscores(self) -> None:
+        with self.catalogue_response(), self.mock_job_client() as submit:
+            await self.client.vis_service.tiling.run(object_url=SOURCE_URL, s2s_user_info="{}")
+        self.assertEqual("vis-service", submit.await_args.kwargs["topic"])
+        self.assertEqual(
+            {"object_url": SOURCE_URL, "s2s-user-info": "{}"},
+            submit.await_args.kwargs["parameters"],
+        )
+
+    async def test_topic_normalisation_uses_one_catalogue_lookup(self) -> None:
+        with (
+            self.catalogue_response(),
+            self.mock_job_client(),
+            mock.patch.object(
+                self.client._discovery, "list_tasks", wraps=self.client._discovery.list_tasks
+            ) as discover,
+        ):
+            await self.client.vis_service.tiling.run(object_url=SOURCE_URL, s2s_user_info="{}")
+        discover.assert_awaited_once()
+
     async def test_catalogue_is_shared_across_topics(self) -> None:
         """One catalogue fetch serves every topic, not just the first one touched."""
         with self.catalogue_response(), self.mock_job_client() as submit:
