@@ -20,17 +20,17 @@ loader that turns the reference back into a typed object or attribute.
 from __future__ import annotations
 
 import json
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from typing import Any
 from unittest import IsolatedAsyncioTestCase, mock
 
-import jmespath
 from evo.common.test_tools import TestWithConnector
 from evo.objects import ObjectSchema
 from evo.objects.typed import BaseObject
 
 from data import load_test_data
+from evo import jmespath
 from evo.compute import ComputeClient, ResultNode, TaskResult
 from test_resolution import (
     BLOCK_MODEL,
@@ -74,7 +74,7 @@ def loaded_object(document: dict, schema: ObjectSchema = POINTSET) -> mock.Magic
 class _FakeAttributes:
     """The name-or-key lookup every typed attribute collection offers."""
 
-    def __init__(self, attributes: list[dict]) -> None:
+    def __init__(self, attributes: Sequence[Mapping[str, Any]]) -> None:
         self._attributes = attributes
 
     def __getitem__(self, name: str) -> mock.Mock:
@@ -183,6 +183,23 @@ class TestObjectOutputs(HydrationTestCase):
 
 class TestAttributeOutputs(HydrationTestCase):
     """``output: attribute`` names an attribute on a sibling object, not an object."""
+
+    async def test_sdk_array_and_object_search_proxies_load(self) -> None:
+        owner = loaded_object(POINTSET_DOCUMENT)
+        for expression, proxy_type in (
+            ("locations.attributes[?name=='estimate']", jmespath.JMESPathArrayProxy),
+            ("locations.attributes[0]", jmespath.JMESPathObjectProxy),
+        ):
+            with self.subTest(expression=expression):
+                self.assertIsInstance(owner.search(expression), proxy_type)
+                results = {
+                    **RESULTS,
+                    "target": {**RESULTS["target"], "attribute": {"reference": expression, "name": "estimate"}},
+                }
+                result = TaskResult(results, self.schema, self.context)
+                with self.objects_service(**{TARGET_URL: owner}):
+                    attribute = await result.target.attribute.load()
+                self.assertEqual("estimate", attribute.name)
 
     async def test_the_attribute_is_loaded_from_the_object_attribute_from_points_at(self) -> None:
         with self.objects_service(**{TARGET_URL: loaded_object(POINTSET_DOCUMENT)}) as loader:
