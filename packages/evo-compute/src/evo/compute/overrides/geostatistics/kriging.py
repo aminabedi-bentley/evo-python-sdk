@@ -71,7 +71,7 @@ __all__ = [
     "bind",
 ]
 
-# Older catalogues use this spelling; the SDK keeps the current public name.
+# The published catalogue uses the British spelling; the SDK keeps the current public name.
 PARAMETER_ALIASES = {"block_discretisation": "block_discretization"}
 
 # What each reference parameter takes. The model fields are annotated with their *validated*
