@@ -68,6 +68,9 @@ __all__ = [
     "bind",
 ]
 
+# The published catalogue uses the British spelling for this parameter.
+PARAMETER_ALIASES = {"block_discretisation": "block_discretization"}
+
 # What each reference parameter takes. The model fields are annotated with their *validated*
 # type, which a checker reads as the narrow one; a signature has to say what it accepts.
 _SourceInput = Source | Attribute | BlockModelAttribute

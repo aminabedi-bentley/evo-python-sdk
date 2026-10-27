@@ -86,9 +86,11 @@ def _python_annotation(prop: dict[str, Any]) -> Any:
 
 def _wire_names(spec: TaskResource) -> dict[str, str]:
     """Map unambiguous Python parameter names back to the catalogue's wire names."""
+    override = load_override(_normalise(spec.topic), _normalise(spec.name))
+    aliases = getattr(override, "PARAMETER_ALIASES", {}) if override is not None else {}
     names: dict[str, str] = {}
     for wire_name in (spec.parameters or {}).get("properties", {}):
-        python_name = _normalise(wire_name)
+        python_name = aliases.get(wire_name, _normalise(wire_name))
         if not python_name.isidentifier() or keyword.iskeyword(python_name) or python_name in names:
             return {}
         names[python_name] = wire_name

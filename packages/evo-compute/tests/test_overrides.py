@@ -47,6 +47,7 @@ from evo.compute.overrides.geostatistics.kriging import KrigingOverride
 from evo.compute.tasks import CreateAttribute, Source, Target, UpdateAttribute
 from evo.compute.tasks.common import Filter, FilterCondition
 from evo.compute.tasks.geostatistics.kriging import (
+    BlockDiscretization,
     KrigingMethod,
     KrigingResult,
     KrigingRunner,
@@ -153,6 +154,22 @@ class TestTheSeam(OverrideTestCase):
     def test_an_overridden_task_is_served_by_its_own_runner(self) -> None:
         """The module at ``overrides/geostatistics/kriging.py`` claims the task."""
         self.assertIsInstance(self.client.geostatistics.kriging, KrigingOverride)
+
+    async def test_published_kriging_spelling_is_used_on_the_wire(self) -> None:
+        catalogue = mock.AsyncMock(return_value=published_catalogue())
+        with (
+            mock.patch.object(DiscoveryClient, "list_tasks", catalogue),
+            _capture_submit("evo.compute.engine") as submit,
+        ):
+            with self.assertRaises(_SubmitCaptured):
+                await self.client.geostatistics.kriging.run(
+                    **self.inputs(block_discretization=BlockDiscretization(nx=2, ny=3, nz=4))
+                )
+
+        payload = submit.await_args.kwargs["parameters"]
+        self.assertEqual({"nx": 2, "ny": 3, "nz": 4}, payload["block_discretisation"])
+        self.assertNotIn("block_discretization", payload)
+        catalogue.assert_awaited_once()
 
     def test_the_override_remains_async_without_a_blocking_wrapper(self) -> None:
         self.assertTrue(inspect.iscoroutinefunction(self.client.geostatistics.kriging.run))
