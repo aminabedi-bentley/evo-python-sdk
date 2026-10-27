@@ -83,8 +83,11 @@ until the catalogue cache expires, and submits batch jobs concurrently. Register
 runners convert their results back to the native SDK classes. A single input still returns
 its native result, and a list still returns an ordered `TaskResultList` with notebook
 formatting and aggregate progress. Preview remains an explicit opt-in on this facade.
-These calls now require access to the task catalogue as well as job submission. Direct
-`TaskRunner` usage follows the same engine path, checks and result conversion.
+These calls now require access to the task catalogue as well as job submission. By default,
+the engine also checks referenced objects against the task's supported schemas, which can
+load their metadata, add requests and reject inputs an older runner would have submitted.
+Set `check_schemas=False` to skip those schema checks while keeping parameter validation.
+Direct `TaskRunner` usage follows the same engine path, checks and result conversion.
 
 The [estimation engine notebook](docs/examples/estimation_engine.ipynb) follows the
 existing estimation workflow, showing both the unchanged `tasks.run(...)` call and
