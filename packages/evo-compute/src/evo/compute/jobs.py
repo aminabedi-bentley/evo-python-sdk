@@ -109,7 +109,7 @@ class TaskJob(Generic[TResult]):
         self,
         *,
         fb: IFeedback | None = None,
-        polling_interval_seconds: float = 0.5,
+        polling_interval_seconds: float = 5.0,
         retry: Retry | None = None,
     ) -> TResult:
         """Wait for completion and convert the payload to the declared result type.

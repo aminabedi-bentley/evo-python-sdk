@@ -71,7 +71,7 @@ class TestTaskJob(IsolatedAsyncioTestCase):
         self.assertEqual(RESULT_PAYLOAD, result)
         self.assertEqual("grid", result.target.name)
         self.assertTrue(inspect.iscoroutinefunction(result.target.load))
-        self.backend.wait_for_results.assert_awaited_once_with(polling_interval_seconds=0.5, retry=None, fb=NoFeedback)
+        self.backend.wait_for_results.assert_awaited_once_with(polling_interval_seconds=5.0, retry=None, fb=NoFeedback)
 
     async def test_results_inherit_client_feedback(self) -> None:
         feedback = mock.MagicMock(spec=IFeedback)
@@ -378,7 +378,7 @@ class TestRestoreJob(ComputeClientTestCase):
             self.assertTrue(inspect.iscoroutinefunction(result.target.load))
             await job.status()
             await job.cancel()
-        wait.assert_awaited_once_with(polling_interval_seconds=0.5, retry=None, fb=feedback)
+        wait.assert_awaited_once_with(polling_interval_seconds=5.0, retry=None, fb=feedback)
         status.assert_awaited_once()
         cancel.assert_awaited_once()
         self.assertEqual(1, self.transport.request.call_count)
