@@ -23,12 +23,77 @@ from evo.common.test_tools import TestWithConnector
 
 from data import load_test_data
 from evo.compute import ComputeClient, ParameterValidationError, TaskResource
-from evo.compute.validation import validate_parameters
+from evo.compute.validation import _warn_unknown_fields, validate_parameters
 
 
 def make_spec(parameters: dict[str, Any], *, topic: str = "demo", name: str = "widget") -> TaskResource:
     """Build a TaskResource carrying the given parameter schema."""
     return TaskResource.model_validate({"topic": topic, "name": name, "parameters": parameters})
+
+
+class TestAdditionalPropertiesPolicy(unittest.TestCase):
+    def test_closed_objects_reject_unknown_fields(self) -> None:
+        with self.assertRaisesRegex(ParameterValidationError, "new_option"):
+            _warn_unknown_fields(
+                {"properties": {}, "additionalProperties": False},
+                {"new_option": True},
+                ["config"],
+                "demo.widget",
+            )
+
+    def test_additional_property_values_are_validated(self) -> None:
+        with self.assertRaisesRegex(ParameterValidationError, "new_count"):
+            _warn_unknown_fields(
+                {"additionalProperties": {"type": "integer", "minimum": 1}},
+                {"new_count": "invalid"},
+                ["counts"],
+                "demo.widget",
+            )
+
+    def test_explicitly_open_objects_do_not_warn(self) -> None:
+        with self.assertNoLogs("compute.validation", level="WARNING"):
+            _warn_unknown_fields(
+                {"properties": {}, "additionalProperties": True},
+                {"new_option": True},
+                [],
+                "demo.widget",
+            )
+
+    def test_unspecified_policy_warns_without_exposing_values(self) -> None:
+        with self.assertLogs("compute.validation", level="WARNING") as logs:
+            _warn_unknown_fields({"properties": {}}, {"new_option": "private value"}, [], "demo.widget")
+        self.assertIn("to be submitted as is", logs.output[0])
+        self.assertNotIn("private value", logs.output[0])
+        self.assertNotIn("wire format", logs.output[0])
+
+    def test_additional_value_schemas_can_reference_root_definitions(self) -> None:
+        node = {"additionalProperties": {"$ref": "#/$defs/Count"}}
+        root = {"$defs": {"Count": {"type": "integer", "minimum": 1}}}
+        _warn_unknown_fields(node, {"new_count": 2}, ["counts"], "demo.widget", root=root)
+        with self.assertRaisesRegex(ParameterValidationError, "counts.new_count"):
+            _warn_unknown_fields(node, {"new_count": 0}, ["counts"], "demo.widget", root=root)
+
+    def test_an_empty_additional_schema_accepts_values_without_warning(self) -> None:
+        with self.assertNoLogs("compute.validation", level="WARNING"):
+            _warn_unknown_fields(
+                {"additionalProperties": {}},
+                {"new_option": {"nested": [None, True]}},
+                [],
+                "demo.widget",
+            )
+
+    def test_pattern_properties_are_not_reported_as_extra_fields(self) -> None:
+        with self.assertNoLogs("compute.validation", level="WARNING"):
+            _warn_unknown_fields(
+                {"patternProperties": {"^count_": {"type": "integer"}}, "additionalProperties": False},
+                {"count_samples": 2},
+                [],
+                "demo.widget",
+            )
+
+    def test_unspecified_policy_warns_for_free_form_objects_too(self) -> None:
+        with self.assertLogs("compute.validation", level="WARNING"):
+            _warn_unknown_fields({"type": "object"}, {"new_option": True}, [], "demo.widget")
 
 
 class TestValidateParameters(unittest.TestCase):
@@ -178,6 +243,92 @@ class TestValidateParameters(unittest.TestCase):
         )
         validate_parameters(spec, {"shape": "circle"}, deep=True)
         validate_parameters(spec, {"shape": 3}, deep=True)
+
+    def test_closed_objects_reject_new_fields_without_weakening_known_constraints(self) -> None:
+        spec = make_spec(
+            {
+                "type": "object",
+                "properties": {"config": {"$ref": "#/$defs/Config"}},
+                "required": ["config"],
+                "additionalProperties": False,
+                "$defs": {
+                    "Config": {
+                        "type": "object",
+                        "properties": {"count": {"type": "integer", "minimum": 1}},
+                        "required": ["count"],
+                        "additionalProperties": False,
+                    }
+                },
+            }
+        )
+        parameters = {"config": {"count": 2}}
+        validate_parameters(spec, parameters, deep=True)
+        self.assertEqual({"config": {"count": 2}}, parameters)
+
+        for invalid in ({}, {"count": "2"}, {"count": 0}, {"count": 2, "new_option": None}):
+            with self.subTest(invalid=invalid), self.assertRaises(ParameterValidationError):
+                validate_parameters(spec, {"config": invalid}, deep=True)
+        with self.assertRaisesRegex(ParameterValidationError, "new_parameter"):
+            validate_parameters(spec, {**parameters, "new_parameter": False}, deep=True)
+
+    def test_closed_discriminated_union_branches_reject_new_fields(self) -> None:
+        spec = make_spec(
+            {
+                "type": "object",
+                "properties": {
+                    "method": {
+                        "discriminator": {"propertyName": "kind"},
+                        "oneOf": [
+                            {
+                                "type": "object",
+                                "properties": {"kind": {"const": "ordinary"}},
+                                "required": ["kind"],
+                                "additionalProperties": False,
+                            },
+                            {
+                                "type": "object",
+                                "properties": {"kind": {"const": "simple"}, "mean": {"type": "number"}},
+                                "required": ["kind", "mean"],
+                                "additionalProperties": False,
+                            },
+                        ],
+                    }
+                },
+            }
+        )
+        validate_parameters(spec, {"method": {"kind": "simple", "mean": 2.0}}, deep=True)
+        with self.assertRaisesRegex(ParameterValidationError, "new_option"):
+            validate_parameters(spec, {"method": {"kind": "simple", "mean": 2.0, "new_option": True}}, deep=True)
+        with self.assertRaisesRegex(ParameterValidationError, r"method\.mean"):
+            validate_parameters(spec, {"method": {"kind": "simple", "mean": "invalid"}}, deep=True)
+
+    def test_typed_maps_and_schema_literals_keep_their_constraints(self) -> None:
+        spec = make_spec(
+            {
+                "type": "object",
+                "properties": {
+                    "counts": {"type": "object", "additionalProperties": {"type": "integer", "minimum": 1}},
+                    "literal": {"const": {"additionalProperties": False, "unevaluatedProperties": False}},
+                },
+                "unevaluatedProperties": False,
+            }
+        )
+        original = json.dumps(spec.parameters, sort_keys=True)
+        literal = {"additionalProperties": False, "unevaluatedProperties": False}
+        validate_parameters(spec, {"counts": {"new_counter": 2}, "literal": literal}, deep=True)
+        self.assertEqual(original, json.dumps(spec.parameters, sort_keys=True))
+        with self.assertRaisesRegex(ParameterValidationError, "new_field"):
+            validate_parameters(spec, {"new_field": None}, deep=True)
+        for invalid in ("2", 0):
+            with (
+                self.subTest(invalid=invalid),
+                self.assertRaisesRegex(ParameterValidationError, r"counts\.new_counter"),
+            ):
+                validate_parameters(spec, {"counts": {"new_counter": invalid}}, deep=True)
+        with self.assertRaisesRegex(ParameterValidationError, "literal"):
+            validate_parameters(
+                spec, {"literal": {"additionalProperties": True, "unevaluatedProperties": True}}, deep=True
+            )
 
     # -- reference-leaf relaxation ----------------------------------------- #
 

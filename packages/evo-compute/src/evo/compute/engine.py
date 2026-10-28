@@ -17,7 +17,7 @@ a task is run, reads that task's schema from the live discovery catalogue to sha
 and submit the job::
 
     client = ComputeClient(context)
-    result = await client.geostatistics.kriging_gcp.run(source=..., target=..., ...)
+    result = await client.geostatistics.kriging.run(source=..., target=..., neighborhood=..., ...)
 
 A call is checked, resolved, checked again and submitted: required parameters first
 (before anything reaches the network), then :mod:`~evo.compute.resolution` turns the
@@ -29,6 +29,9 @@ What comes back is hydrated against the task's ``results`` schema by
 Discovery is performed the first time a task within a topic is ``run(...)``. The
 catalogue is then held by the underlying :class:`~evo.compute.discovery.DiscoveryClient`,
 so repeated runs are served from there until its cache expires.
+
+A task can opt into a hand-written surface through :mod:`evo.compute.overrides`.
+Named calls through ``arun`` use the same override as attribute-based calls.
 """
 
 from __future__ import annotations
@@ -45,6 +48,7 @@ from .discovery import DEFAULT_CACHE_TTL_SECONDS, DiscoveryClient
 from .endpoints.models import TaskResource
 from .exceptions import ParameterValidationError
 from .outputs import TaskResult
+from .overrides import load_override
 from .resolution import ReferenceResolver
 from .validation import validate_parameters
 
@@ -82,9 +86,11 @@ def _python_annotation(prop: dict[str, Any]) -> Any:
 
 def _wire_names(spec: TaskResource) -> dict[str, str]:
     """Map unambiguous Python parameter names back to the catalogue's wire names."""
+    override = load_override(_normalise(spec.topic), _normalise(spec.name))
+    aliases = getattr(override, "PARAMETER_ALIASES", {}) if override is not None else {}
     names: dict[str, str] = {}
     for wire_name in (spec.parameters or {}).get("properties", {}):
-        python_name = _normalise(wire_name)
+        python_name = aliases.get(wire_name, _normalise(wire_name))
         if not python_name.isidentifier() or keyword.iskeyword(python_name) or python_name in names:
             return {}
         names[python_name] = wire_name
@@ -124,10 +130,7 @@ def _signature_from_schema(spec: TaskResource) -> inspect.Signature:
                     annotation=_python_annotation(prop),
                 )
             )
-    # ``preview`` defaults to opting in for tasks gated behind a feature flag.
-    parameters.append(
-        inspect.Parameter("preview", inspect.Parameter.KEYWORD_ONLY, default=bool(spec.feature_flag), annotation=bool)
-    )
+    parameters.append(inspect.Parameter("preview", inspect.Parameter.KEYWORD_ONLY, default=False, annotation=bool))
     if properties and not names:
         parameters.append(inspect.Parameter("parameters", inspect.Parameter.VAR_KEYWORD, annotation=Any))
     return inspect.Signature(parameters, return_annotation=TaskResult)
@@ -139,13 +142,12 @@ class ComputeClient:
     :param context: An authenticated Evo context.
     :param cache_ttl_seconds: How long a discovered task catalogue is cached.
     :param validate: Check the parameters against the task's JSON Schema before submitting
-        (required-field presence, and, under ``deep_validation``, the whole payload).
+        (required-field presence, and, under ``deep_validation``, known value constraints).
         Defaults to ``True``. ``False`` turns off deep validation too, whatever
         ``deep_validation`` says. It does *not* make the call unchecked: the parameters are
-        still bound to the signature synthesised from the schema, so an unknown or missing
-        required argument is still rejected. That is how the payload is built, not a
-        validation pass, and there is no useful call to make without it.
-    :param deep_validation: Additionally run full JSON Schema Draft 2020-12 validation.
+        still bound to the task's required arguments, and explicit extra-field rules
+        still apply. Custom runners also retain their own parameter checks.
+    :param deep_validation: Additionally check the full JSON Schema Draft 2020-12 constraints.
         Defaults to ``False``. Only consulted when ``validate`` is ``True``.
     :param check_schemas: Check that each referenced geoscience object is of a schema the
         task declares support for. Defaults to following ``validate``. Independent of it
@@ -215,6 +217,28 @@ class ComputeClient:
         validate: bool | None = None,
         deep_validation: bool | None = None,
         check_schemas: bool | None = None,
+    ) -> Any:
+        """Run a task by name, using its custom runner when one is registered.
+
+        Parameters use the same names as ``client.<topic>.<task>.run(...)``.
+        Custom tasks return their native result; other tasks return ``TaskResult``.
+        Validation options override the client's settings for this call.
+        Preview is off unless ``parameters`` explicitly includes ``preview=True``.
+        """
+        options = dict(validate=validate, deep_validation=deep_validation, check_schemas=check_schemas)
+        if (override := load_override(_normalise(topic), _normalise(task))) is not None:
+            return await override.bind(self, topic, task).run_parameters(parameters, **options)
+        return await self._run_generic(topic, task, parameters, **options)
+
+    async def _run_generic(
+        self,
+        topic: str,
+        task: str,
+        parameters: dict[str, Any],
+        *,
+        validate: bool | None = None,
+        deep_validation: bool | None = None,
+        check_schemas: bool | None = None,
     ) -> TaskResult:
         """Discover the task (cached), resolve and validate the parameters, submit, and hydrate the results.
 
@@ -229,8 +253,18 @@ class ComputeClient:
         spec = await self._resolve_spec(topic, task)
         label = f"{topic}.{_normalise(task)}"
         signature = _signature_from_schema(spec)
+        accepts_extra = any(
+            parameter.kind == inspect.Parameter.VAR_KEYWORD for parameter in signature.parameters.values()
+        )
+        extra_parameters = (
+            {}
+            if accepts_extra
+            else {name: value for name, value in parameters.items() if name not in signature.parameters}
+        )
         try:
-            bound = signature.bind(**parameters)
+            bound = signature.bind(
+                **{name: value for name, value in parameters.items() if name not in extra_parameters}
+            )
         except TypeError as error:
             raise ParameterValidationError(f"{label}.run(): {error}", task=label, errors=[str(error)]) from None
 
@@ -243,6 +277,7 @@ class ComputeClient:
             wire_parameters = {names.get(name, name): value for name, value in wire_parameters.items()}
         else:
             wire_parameters.update(wire_parameters.pop("parameters", {}))
+        wire_parameters.update(extra_parameters)
 
         if validate is None:
             validate = self._validate
@@ -300,9 +335,11 @@ class _TopicProxy:
         self._client = client
         self._topic = topic
 
-    def __getattr__(self, name: str) -> _TaskProxy:
+    def __getattr__(self, name: str) -> Any:
         if name.startswith("_"):
             raise AttributeError(name)
+        if (override := load_override(_normalise(self._topic), _normalise(name))) is not None:
+            return override.bind(self._client, self._topic, name)
         return _TaskProxy(self._client, self._topic, name)
 
     def __dir__(self) -> list[str]:

@@ -36,6 +36,7 @@ loaders are additions on top, driven entirely by the schema; nothing here is tas
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, Any
 
 from evo.common import IContext
@@ -179,12 +180,12 @@ def _hydrate(value: Any, schema: Any, context: IContext, root: dict, path: tuple
     return value
 
 
-def _search(owner: BaseObject, expression: str) -> dict[str, Any] | None:
+def _search(owner: BaseObject, expression: str) -> Mapping[str, Any] | None:
     """The first attribute a JMESPath expression selects on an object, if it selects any."""
     found = owner.search(expression)
-    if isinstance(found, list):
-        found = found[0] if found else None
-    return found if isinstance(found, dict) else None
+    if isinstance(found, Sequence) and not isinstance(found, (str, bytes)):
+        found = found[0] if len(found) else None
+    return found if isinstance(found, Mapping) else None
 
 
 def _healed(expression: str, containers: Any, schema: ObjectSchema) -> str:
