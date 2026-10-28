@@ -61,7 +61,7 @@ from evo.compute.tasks.common import Ellipsoid, EllipsoidRanges, Filter, FilterC
 from evo.compute.tasks.common.source_target import _convert_object_reference, _get_attribute_expression
 from evo.compute.tasks.geostatistics.conditioned_simulator import ConSimRunner
 from evo.compute.tasks.geostatistics.declustering import DeclusteringGrid, DeclusteringRunner, DeclusteringSource
-from evo.compute.tasks.geostatistics.kriging import BlockDiscretisation, KrigingMethod, KrigingRunner
+from evo.compute.tasks.geostatistics.kriging import BlockDiscretization, KrigingMethod, KrigingRunner
 from evo.compute.tasks.geostatistics.location_wise import (
     LocationWiseRunner,
     LocationWiseTarget,
@@ -318,7 +318,7 @@ class PayloadParityTestCase(IsolatedAsyncioTestCase):
     async def engine_payload(self, runner_cls, **parameters: Any) -> dict[str, Any]:
         """The payload the generic engine submits for the same job, described as plain JSON."""
         catalogue = mock.patch.object(
-            DiscoveryClient, "get_topic_tasks", mock.AsyncMock(return_value=[task_spec(runner_cls)])
+            DiscoveryClient, "list_tasks", mock.AsyncMock(return_value=[task_spec(runner_cls)])
         )
         with catalogue, _capture_submit("evo.compute.engine") as submit:
             with self.assertRaises(_SubmitCaptured):
@@ -429,13 +429,13 @@ class TestKrigingPayloadParity(PayloadParityTestCase):
         """``neighborhood``/``kriging_method`` are the aliases of ``search``/``method``."""
         await self.assertSameInputsParity(KrigingRunner, **self._inputs())
 
-    async def test_simple_kriging_with_block_discretisation(self) -> None:
+    async def test_simple_kriging_with_block_discretization(self) -> None:
         """A tagged method object and an optional sub-block frame survive both paths intact."""
         await self.assertSameInputsParity(
             KrigingRunner,
             **self._inputs(
                 kriging_method=KrigingMethod.simple(mean=12.5),
-                block_discretisation=BlockDiscretisation(nx=3, ny=3, nz=2),
+                block_discretization=BlockDiscretization(nx=3, ny=3, nz=2),
             ),
         )
 

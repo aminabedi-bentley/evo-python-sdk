@@ -15,10 +15,46 @@ Run ``pyright stubs/checks/usage_ok.py`` (or ``mypy``) from ``packages/evo-compu
 let ``tests/test_stubgen.py`` do it when the checker is installed.
 """
 
+from typing import TYPE_CHECKING
+
 from evo.common import IContext
 from evo.objects.typed import Attribute, BaseObject, PendingAttribute
+from typing_extensions import assert_type
 
 from evo.compute import ComputeClient
+from evo.compute.tasks.common import Ellipsoid, EllipsoidRanges, Rotation, SearchNeighborhood
+
+if TYPE_CHECKING:
+    from evo.compute.engine import GeostatisticsKrigingResult
+
+
+def _model_neighborhood() -> SearchNeighborhood:
+    return SearchNeighborhood(
+        ellipsoid=Ellipsoid(
+            ranges=EllipsoidRanges(major=200.0, semi_major=150.0, minor=100.0),
+            rotation=Rotation(dip_azimuth=45.0, dip=10.0, pitch=5.0),
+        ),
+        max_samples=20,
+        min_samples=4,
+        max_empty_octants=None,
+        max_samples_per_octant=None,
+        max_empty_quadrants=None,
+        max_samples_per_quadrant=None,
+        max_samples_per_drillhole=None,
+        max_drillholes_per_estimate=None,
+    )
+
+
+async def neighborhood_objects_async(context: IContext) -> None:
+    client = ComputeClient(context)
+    result = await client.geostatistics.declustering.run(
+        source="https://example.com/objects/samples",
+        grid="https://example.com/objects/grid",
+        target={"object": "https://example.com/objects/target", "attribute": "weights"},
+        neighborhood=_model_neighborhood(),
+        power=2.5,
+    )
+    await result.target.attribute.to_dataframe()
 
 
 async def declustering(context: IContext) -> None:
@@ -48,7 +84,7 @@ async def declustering(context: IContext) -> None:
 
 async def normal_score(context: IContext) -> None:
     client = ComputeClient(context)
-    await client.geostatistics.normal_score_gcp.run(
+    await client.geostatistics.normal_score.run(
         method="forward",
         source={
             "object": "https://example.com/objects/samples",
@@ -67,6 +103,18 @@ async def not_in_the_snapshot(context: IContext) -> None:
     client = ComputeClient(context)
     result: dict = await client.arun("geostatistics", "some-new-task", {"source": "..."})
     print(result)
+
+
+async def a_topic_the_snapshot_has_never_seen(context: IContext) -> None:
+    """Execution is live; hints are point-in-time. An unlisted name is untyped, not wrong.
+
+    The catalogue is per-organization and moves between SDK releases, so the snapshot is
+    never all of it. These calls reach the engine exactly as a snapshotted task does; the
+    only thing missing is the parameter and result types.
+    """
+    client = ComputeClient(context)
+    await client.geology.some_task.run(anything=1)
+    await client.geostatistics.a_task_added_last_week.run(source="...")
 
 
 async def typed_handles(context: IContext, pointset: BaseObject, weights: PendingAttribute) -> None:
@@ -91,18 +139,18 @@ async def typed_handles(context: IContext, pointset: BaseObject, weights: Pendin
     )
 
 
-async def typed_attribute_source(context: IContext, grade: Attribute, target: BaseObject) -> None:
+async def typed_attribute_source(context: IContext, grade: Attribute, kriged: PendingAttribute) -> None:
     client = ComputeClient(context)
-    await client.geostatistics.kriging_gcp.run(
+    result = await client.geostatistics.kriging.run(
         source=grade,
-        target={"object": target, "attribute": "kriged_grade"},
-        kriging_method={"type": "ordinary"},
+        target=kriged,
         variogram="https://example.com/objects/variogram",
-        neighborhood={
-            "ellipsoid": {
-                "ellipsoid_ranges": {"major": 100.0, "semi_major": 100.0, "minor": 50.0},
-                "rotation": {"dip_azimuth": 0.0, "dip": 0.0, "pitch": 0.0},
-            },
-            "max_samples": 20,
-        },
+        neighborhood=SearchNeighborhood(
+            ellipsoid=Ellipsoid(ranges=EllipsoidRanges(major=100.0, semi_major=100.0, minor=50.0)),
+            max_samples=20,
+        ),
+        kriging_method={"type": "ordinary"},
     )
+    assert_type(result, GeostatisticsKrigingResult)
+    print(result.target.attribute.name)
+    await result.target.load()

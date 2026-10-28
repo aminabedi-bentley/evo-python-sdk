@@ -144,7 +144,7 @@ class BehaviorParityTestCase(IsolatedAsyncioTestCase):
     def _catalogue(self, runner_cls):
         """Serve the engine the task's schema, derived from the runner's own parameter model."""
         return mock.patch.object(
-            DiscoveryClient, "get_topic_tasks", mock.AsyncMock(return_value=[task_spec(runner_cls)])
+            DiscoveryClient, "list_tasks", mock.AsyncMock(return_value=[task_spec(runner_cls)])
         )
 
     async def runner_refusal(self, runner_cls, **inputs: Any) -> Exception:
@@ -339,11 +339,11 @@ class TestKrigingBehaviorParity(BehaviorParityTestCase):
             KrigingRunner, "kriging_method", **kriging_inputs(kriging_method={"type": "simple"})
         )
 
-    async def test_a_block_discretisation_outside_its_range(self) -> None:
+    async def test_a_block_discretization_outside_its_range(self) -> None:
         """1 to 9 per axis, on both paths."""
-        discretisation = {"nx": 99, "ny": 3, "nz": 2}
+        discretization = {"nx": 99, "ny": 3, "nz": 2}
         await self.assertBothRefuse(
-            KrigingRunner, "block_discretisation", **kriging_inputs(block_discretisation=discretisation)
+            KrigingRunner, "block_discretization", **kriging_inputs(block_discretization=discretization)
         )
 
     async def test_an_attribute_that_is_not_a_name_or_expression(self) -> None:
